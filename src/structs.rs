@@ -1,6 +1,6 @@
 use diesel_ulid::DieselUlid;
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Hash, Clone)]
 pub enum Resource {
     Project(DieselUlid),
     Collection(DieselUlid),

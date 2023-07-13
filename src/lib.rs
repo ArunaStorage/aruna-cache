@@ -1,2 +1,2 @@
 pub mod cache;
-mod structs;
+pub mod structs;

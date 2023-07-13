@@ -183,14 +183,14 @@ mod tests {
 
         let project_1 = Project(DieselUlid::generate());
         let collection_1 = Collection(DieselUlid::generate());
-        let collection_2 = Collection(DieselUlid::generate());
-        let dataset_1 = Dataset(DieselUlid::generate());
-        let dataset_2 = Dataset(DieselUlid::generate());
-        let dataset_3 = Dataset(DieselUlid::generate());
-        let object_1 = Object(DieselUlid::generate());
-        let object_2 = Object(DieselUlid::generate());
-        let object_3 = Object(DieselUlid::generate());
-        let object_4 = Object(DieselUlid::generate());
+        let _collection_2 = Collection(DieselUlid::generate());
+        let _dataset_1 = Dataset(DieselUlid::generate());
+        let _dataset_2 = Dataset(DieselUlid::generate());
+        let _dataset_3 = Dataset(DieselUlid::generate());
+        let _object_1 = Object(DieselUlid::generate());
+        let _object_2 = Object(DieselUlid::generate());
+        let _object_3 = Object(DieselUlid::generate());
+        let _object_4 = Object(DieselUlid::generate());
 
 
         cache.add_link(project_1.clone(), collection_1.clone()).unwrap();

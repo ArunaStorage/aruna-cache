@@ -1,19 +1,21 @@
+use crate::structs::{Resource, ResourcePermission};
 use ahash::RandomState;
+use anyhow::anyhow;
+use anyhow::Result;
+use aruna_rust_api::api::storage::models::v2::{
+    generic_resource::Resource as ApiResource, PermissionLevel,
+};
 use dashmap::{DashMap, DashSet};
 use diesel_ulid::DieselUlid;
-use aruna_rust_api::api::storage::models::v2::{generic_resource::Resource as ApiResource, PermissionLevel};
-use crate::structs::{ResourcePermission, Resource};
-use anyhow::Result;
-use anyhow::anyhow;
-
 
 #[derive(Debug)]
 pub struct Cache {
-    // Graph cache contains From -> [all] 
+    // Graph cache contains From -> [all]
     pub graph_cache: DashMap<Resource, DashSet<Resource, RandomState>, RandomState>,
     pub shared_id_cache: DashMap<DieselUlid, DieselUlid, RandomState>,
     pub object_cache: Option<DashMap<DieselUlid, ApiResource, RandomState>>,
-    pub permissions: DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
+    pub permissions:
+        DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
 }
 
 impl Cache {
@@ -28,7 +30,10 @@ impl Cache {
 
     pub fn traverse_graph(&self, from: Resource) -> Result<Vec<(Resource, Resource)>> {
         let mut return_vec = Vec::new();
-        let l1 = self.graph_cache.get(&from).ok_or_else(|| anyhow::anyhow!("Cannot find resource"))?;
+        let l1 = self
+            .graph_cache
+            .get(&from)
+            .ok_or_else(|| anyhow::anyhow!("Cannot find resource"))?;
         for l1_item in l1.iter() {
             let l1_cloned = l1_item.clone();
             if let Some(l2) = self.graph_cache.get(&l1_cloned) {
@@ -50,28 +55,34 @@ impl Cache {
 
     // Gets a list of parent -> child connections, always from parent to child
     pub fn get_parents(&self, from: Resource) -> Result<Vec<(Resource, Resource)>> {
+        let mut return_vec = Vec::new();
         match &from {
             &Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),
             &Resource::Collection(_) => {
                 for ref_val in self.graph_cache.iter() {
                     if ref_val.value().contains(&from) {
-                        return Ok(vec![(ref_val.key().clone(), from)])
+                        return_vec.push((ref_val.key().clone(), from.clone()));
                     }
                 }
-                return Err(anyhow!("Cannot find from resource: {:#?}", from))
-            },
+                if return_vec.is_empty() {
+                    return Err(anyhow!("Cannot find from resource: {:#?}", &from));
+                }
+            }
             &Resource::Dataset(_) => {
                 for ref1_val in self.graph_cache.iter() {
                     if ref1_val.value().contains(&from) {
                         for ref2_val in self.graph_cache.iter() {
                             if ref2_val.value().contains(&ref1_val.key()) {
-                                return Ok(vec![(ref2_val.key().clone(), ref1_val.key().clone()), (ref1_val.key().clone(), from)])
+                                return_vec.push((ref2_val.key().clone(), ref1_val.key().clone()));
                             }
                         }
-                        return Err(anyhow!("Unable to find link from collection: {:#?} to a project", &ref1_val.key()))
+                        return_vec.push((ref1_val.key().clone(), from.clone()));
                     }
                 }
-                return Err(anyhow!("Cannot find from resource: {:#?}", from))},
+                if return_vec.is_empty() {
+                    return Err(anyhow!("Cannot find from resource: {:#?}", &from));
+                }
+            }
             &Resource::Object(_) => {
                 for ref1_val in self.graph_cache.iter() {
                     if ref1_val.value().contains(&from) {
@@ -79,21 +90,26 @@ impl Cache {
                             if ref2_val.value().contains(&ref1_val.key()) {
                                 for ref3_val in self.graph_cache.iter() {
                                     if ref3_val.value().contains(&ref2_val.key()) {
-                                        return Ok(vec![(ref3_val.key().clone(), ref2_val.key().clone()), (ref2_val.key().clone(), ref1_val.key().clone()), (ref1_val.key().clone(), from)])
+                                        return_vec
+                                            .push((ref3_val.key().clone(), ref2_val.key().clone()));
                                     }
                                 }
-                                return Err(anyhow!("Unable to find link from collection: {:#?} to a project", &ref2_val.key()))
                             }
+                            return_vec.push((ref2_val.key().clone(), ref1_val.key().clone()));
                         }
-                        return Err(anyhow!("Unable to find link from dataset: {:#?} to a collection", &ref1_val.key()))
+                        return_vec.push((ref1_val.key().clone(), from.clone()));
                     }
                 }
-                return Err(anyhow!("Cannot find from resource: {:#?}", from))
-            },
+
+                if return_vec.is_empty() {
+                    return Err(anyhow!("Cannot find from resource: {:#?}", &from));
+                }
+            }
         }
+        Ok(return_vec)
     }
 
-    pub fn add_link(&self, from: Resource, to: Resource) -> Result<()>{
+    pub fn add_link(&self, from: Resource, to: Resource) -> Result<()> {
         match (&from, &to) {
             (&Resource::Project(_), &Resource::Collection(_)) => (),
             (&Resource::Project(_), &Resource::Dataset(_)) => (),
@@ -101,7 +117,7 @@ impl Cache {
             (&Resource::Collection(_), &Resource::Dataset(_)) => (),
             (&Resource::Collection(_), &Resource::Object(_)) => (),
             (&Resource::Dataset(_), &Resource::Object(_)) => (),
-            (_, _) => {return Err(anyhow!("Invalid pair from: {:#?}, to: {:#?}", from, to))}
+            (_, _) => return Err(anyhow!("Invalid pair from: {:#?}, to: {:#?}", from, to)),
         }
         let entry = self.graph_cache.entry(from).or_default();
         entry.insert(to);
@@ -124,7 +140,7 @@ impl Cache {
         self.shared_id_cache.insert(shared, persistent);
         self.shared_id_cache.insert(persistent, shared);
     }
-    
+
     pub fn update_shared(&self, shared: DieselUlid, new_persistent: DieselUlid) {
         let old = self.shared_id_cache.insert(shared, new_persistent);
         if let Some(o) = old {
@@ -134,15 +150,15 @@ impl Cache {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use diesel_ulid::DieselUlid;
 
     use super::Cache;
+    use super::Resource::*;
 
     #[test]
-    fn test_shared () {
+    fn test_shared() {
         let cache = Cache::new();
 
         let shared_1 = DieselUlid::generate();
@@ -161,4 +177,19 @@ mod tests {
         assert_eq!(cache.shared_id_cache.len(), 2);
     }
 
+    #[test]
+    fn test_graph() {
+        let cache = Cache::new();
+
+        let project_1 = Project(DieselUlid::generate());
+        let collection_1 = Collection(DieselUlid::generate());
+        let collection_2 = Collection(DieselUlid::generate());
+        let dataset_1 = Dataset(DieselUlid::generate());
+        let dataset_2 = Dataset(DieselUlid::generate());
+        let dataset_3 = Dataset(DieselUlid::generate());
+        let object_1 = Object(DieselUlid::generate());
+        let object_2 = Object(DieselUlid::generate());
+        let object_3 = Object(DieselUlid::generate());
+        let object_4 = Object(DieselUlid::generate());
+    }
 }

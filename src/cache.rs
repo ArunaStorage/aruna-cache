@@ -191,5 +191,11 @@ mod tests {
         let object_2 = Object(DieselUlid::generate());
         let object_3 = Object(DieselUlid::generate());
         let object_4 = Object(DieselUlid::generate());
+
+
+        cache.add_link(project_1.clone(), collection_1.clone()).unwrap();
+        assert_eq!(cache.get_parents(collection_1.clone()).unwrap(), vec![(project_1.clone(), collection_1.clone())]);
+        assert_eq!(cache.traverse_graph(project_1.clone()).unwrap(), vec![(project_1.clone(), collection_1.clone())]);
+        cache.add_link(project_1.clone(), collection_1.clone()).unwrap();
     }
 }

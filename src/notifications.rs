@@ -127,7 +127,7 @@ impl NotificationCache {
             }
             ResourceEventType::Updated => {
                 if let Some(r) = event.resource {
-                    let (associated_id, res) = r.get_ref()?;
+                    let (_associated_id, res) = r.get_ref()?;
                     if let Some(ctx) = event.context {
                         match ctx.event? {
                             Event::RelationUpdates(new_relations) => {
@@ -209,13 +209,13 @@ impl NotificationCache {
             match int.resource_variant() {
                 ResourceVariant::Collection => self
                     .cache
-                    .remove_link(res.clone(), Resource::Project(res_id)),
+                    .remove_link(res.clone(), Resource::Collection(res_id)),
                 ResourceVariant::Dataset => self
                     .cache
-                    .remove_link(res.clone(), Resource::Collection(res_id)),
+                    .remove_link(res.clone(), Resource::Dataset(res_id)),
                 ResourceVariant::Object => self
                     .cache
-                    .remove_link(res.clone(), Resource::Dataset(res_id)),
+                    .remove_link(res.clone(), Resource::Object(res_id)),
                 _ => (),
             }
         }
@@ -246,15 +246,15 @@ impl NotificationCache {
             match int.resource_variant() {
                 ResourceVariant::Collection => self
                     .cache
-                    .add_link(res.clone(), Resource::Project(res_id))
+                    .add_link(res.clone(), Resource::Collection(res_id))
                     .ok()?,
                 ResourceVariant::Dataset => self
                     .cache
-                    .add_link(res.clone(), Resource::Collection(res_id))
+                    .add_link(res.clone(), Resource::Dataset(res_id))
                     .ok()?,
                 ResourceVariant::Object => self
                     .cache
-                    .add_link(res.clone(), Resource::Dataset(res_id))
+                    .add_link(res.clone(), Resource::Object(res_id))
                     .ok()?,
                 _ => (),
             }

@@ -1,3 +1,4 @@
+use crate::structs::PubKey;
 use crate::structs::{Resource, ResourcePermission};
 use ahash::RandomState;
 use anyhow::anyhow;
@@ -17,6 +18,8 @@ pub struct Cache {
     pub object_cache: Option<DashMap<DieselUlid, ApiResource, RandomState>>,
     pub permissions:
         DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
+    pub pubkeys: DashSet<PubKey, RandomState>,
+        
 }
 
 impl Default for Cache {
@@ -33,6 +36,7 @@ impl Cache {
             shared_id_cache: DashMap::with_hasher(RandomState::new()),
             object_cache: None,
             permissions: DashMap::with_hasher(RandomState::new()),
+            pubkeys: DashSet::with_hasher(RandomState::new()),
         }
     }
 
@@ -213,6 +217,14 @@ impl Cache {
             return_vec.push((x.key().clone(), *x.value()))
         }
         Some(return_vec)
+    }
+
+    pub fn add_pubkey(&self, pk: PubKey) {
+        self.pubkeys.insert(pk);
+    }
+
+    pub fn remove_pubkey(&self, pk: PubKey) {
+        self.pubkeys.remove(&pk);
     }
 }
 

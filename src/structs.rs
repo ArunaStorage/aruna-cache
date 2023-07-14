@@ -46,3 +46,9 @@ impl From<Resource> for ResourcePermission {
         ResourcePermission::Resource(value)
     }
 }
+
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Hash, Clone)]
+pub enum PubKey {
+    DataProxy(String),
+    Server(String),
+}

@@ -18,7 +18,7 @@ tokio = {version = "1.28.2", features = ["full"]}
 tonic = {version = "0.9.2", features = ["tls"]}
 
 [dev-dependencies]
-criterion = { version = "0.4", features = ["html_reports", "async_tokio"] }
+criterion = { version = "0.5.1", features = ["html_reports", "async_tokio"] }
 
 [[bench]]
 name = "performance"

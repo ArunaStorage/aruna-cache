@@ -10,9 +10,9 @@ use diesel_ulid::DieselUlid;
 
 #[derive(Debug)]
 pub struct Cache {
-    // TODO: PATH caching
     // Graph cache contains From -> [all]
     pub graph_cache: DashMap<Resource, DashSet<Resource, RandomState>, RandomState>,
+    pub name_cache: DashMap<String, DashSet<Resource, RandomState>, RandomState>,
     pub shared_id_cache: DashMap<DieselUlid, DieselUlid, RandomState>,
     pub object_cache: Option<DashMap<DieselUlid, ApiResource, RandomState>>,
     pub permissions:
@@ -23,6 +23,7 @@ impl Cache {
     pub fn new() -> Self {
         Cache {
             graph_cache: DashMap::with_hasher(RandomState::new()),
+            name_cache: DashMap::with_hasher(RandomState::new()),
             shared_id_cache: DashMap::with_hasher(RandomState::new()),
             object_cache: None,
             permissions: DashMap::with_hasher(RandomState::new()),
@@ -199,10 +200,19 @@ mod tests {
         let _object_3 = Object(DieselUlid::generate());
         let _object_4 = Object(DieselUlid::generate());
 
-
-        cache.add_link(project_1.clone(), collection_1.clone()).unwrap();
-        assert_eq!(cache.get_parents(collection_1.clone()).unwrap(), vec![(project_1.clone(), collection_1.clone())]);
-        assert_eq!(cache.traverse_graph(project_1.clone()).unwrap(), vec![(project_1.clone(), collection_1.clone())]);
-        cache.add_link(project_1.clone(), collection_1.clone()).unwrap();
+        cache
+            .add_link(project_1.clone(), collection_1.clone())
+            .unwrap();
+        assert_eq!(
+            cache.get_parents(collection_1.clone()).unwrap(),
+            vec![(project_1.clone(), collection_1.clone())]
+        );
+        assert_eq!(
+            cache.traverse_graph(project_1.clone()).unwrap(),
+            vec![(project_1.clone(), collection_1.clone())]
+        );
+        cache
+            .add_link(project_1.clone(), collection_1.clone())
+            .unwrap();
     }
 }

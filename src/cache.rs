@@ -117,6 +117,14 @@ impl Cache {
         Ok(return_vec)
     }
 
+    pub fn add_name(&self, res: Resource, name: String) {
+        self.name_cache.entry(name).or_default().insert(res);
+    }
+
+    pub fn remove_name(&self, res: Resource, name: String) {
+        self.name_cache.entry(name).or_default().remove(&res);
+    }
+
     pub fn add_link(&self, from: Resource, to: Resource) -> Result<()> {
         match (&from, &to) {
             (&Resource::Project(_), &Resource::Collection(_)) => (),

@@ -40,7 +40,7 @@ impl Cache {
         let mut return_vec = Vec::new();
         let l1 = self
             .graph_cache
-            .get(&from)
+            .get(from)
             .ok_or_else(|| anyhow::anyhow!("Cannot find resource"))?;
         for l1_item in l1.iter() {
             let l1_cloned = l1_item.clone();
@@ -68,7 +68,7 @@ impl Cache {
             Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),
             Resource::Collection(_) => {
                 for ref_val in self.graph_cache.iter() {
-                    if ref_val.value().contains(&from) {
+                    if ref_val.value().contains(from) {
                         return_vec.push((ref_val.key().clone(), from.clone()));
                         break;
                     }
@@ -79,7 +79,7 @@ impl Cache {
             }
             Resource::Dataset(_) => {
                 for ref1_val in self.graph_cache.iter() {
-                    if ref1_val.value().contains(&from) {
+                    if ref1_val.value().contains(from) {
                         for ref2_val in self.graph_cache.iter() {
                             if ref2_val.value().contains(ref1_val.key()) {
                                 return_vec.push((ref2_val.key().clone(), ref1_val.key().clone()));
@@ -96,7 +96,7 @@ impl Cache {
             }
             Resource::Object(_) => {
                 for ref1_val in self.graph_cache.iter() {
-                    if ref1_val.value().contains(&from) {
+                    if ref1_val.value().contains(from) {
                         for ref2_val in self.graph_cache.iter() {
                             if ref2_val.value().contains(ref1_val.key()) {
                                 for ref3_val in self.graph_cache.iter() {
@@ -207,7 +207,7 @@ impl Cache {
         &self,
         id: &DieselUlid,
     ) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
-        let perms = self.permissions.get(&id)?;
+        let perms = self.permissions.get(id)?;
         let mut return_vec = Vec::new();
         for x in perms.value() {
             return_vec.push((x.key().clone(), *x.value()))

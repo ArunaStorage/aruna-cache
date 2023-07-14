@@ -340,7 +340,6 @@ mod tests {
 
     use super::Cache;
     use super::NotificationCache;
-    use super::Resource::*;
 
     fn mtemplate(res: Resource, irel: Vec<Relation>) -> EventMessage {
         EventMessage {
@@ -371,7 +370,6 @@ mod tests {
 
         let id = DieselUlid::generate();
         let aid = DieselUlid::generate();
-        let from_id = DieselUlid::generate();
 
         let mut res = Resource {
             resource_id: id.to_string(),
@@ -380,11 +378,11 @@ mod tests {
             resource_variant: ResourceVariant::Project as i32,
         };
 
-        let mut irel = vec![Relation {
+        let irel = vec![Relation {
             relation: Some(relation::Relation::Internal(InternalRelation {
-                resource_id: from_id.to_string(),
+                resource_id: id.to_string(),
                 resource_variant: ResourceVariant::Project.into(),
-                direction: RelationDirection::Inbound.into(),
+                direction: RelationDirection::Outbound.into(),
                 variant: Some(Variant::DefinedVariant(
                     InternalRelationVariant::BelongsTo.into(),
                 )),
@@ -392,22 +390,9 @@ mod tests {
         }];
 
         {
-            let irel = Vec::new();
+            let eirel = Vec::new();
             let reply = not_cache
-                .process_message(mtemplate(res.clone(), irel.clone()))
-                .await
-                .unwrap();
-            assert_eq!(
-                reply,
-                Reply {
-                    reply: "a_reply".into(),
-                    salt: "a_salt".into(),
-                    hmac: "a_hmac".into(),
-                }
-            );
-            res.resource_variant = ResourceVariant::Object.into();
-            let reply = not_cache
-                .process_message(mtemplate(res.clone(), irel))
+                .process_message(mtemplate(res.clone(), eirel))
                 .await
                 .unwrap();
             assert_eq!(
@@ -419,5 +404,31 @@ mod tests {
                 }
             );
         }
+        assert_eq!(not_cache.get_associated_id(&id).unwrap(), aid);
+        assert_eq!(not_cache.get_associated_id(&aid).unwrap(), id);
+
+        let res_id = DieselUlid::generate();
+        let as_id = DieselUlid::generate();
+        res.resource_variant = ResourceVariant::Object.into();
+        res.resource_id = res_id.to_string();
+        res.associated_id = as_id.to_string();
+        let reply = not_cache
+            .process_message(mtemplate(res.clone(), irel))
+            .await
+            .unwrap();
+        assert_eq!(
+            reply,
+            Reply {
+                reply: "a_reply".into(),
+                salt: "a_salt".into(),
+                hmac: "a_hmac".into(),
+            }
+        );
+
+        assert_eq!(not_cache.get_associated_id(&res_id).unwrap(), as_id);
+        assert_eq!(not_cache.get_associated_id(&as_id).unwrap(), res_id);
+
+        //dbg!(&not_cache.cache.graph_cache);
+        //assert!(not_cache.get_parents(&crate::structs::Resource::Object(id.clone())).unwrap().len() == 1);
     }
 }

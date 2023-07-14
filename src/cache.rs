@@ -36,7 +36,7 @@ impl Cache {
         }
     }
 
-    pub fn traverse_graph(&self, from: Resource) -> Result<Vec<(Resource, Resource)>> {
+    pub fn traverse_graph(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
         let mut return_vec = Vec::new();
         let l1 = self
             .graph_cache
@@ -62,7 +62,7 @@ impl Cache {
     }
 
     // Gets a list of parent -> child connections, always from parent to child
-    pub fn get_parents(&self, from: Resource) -> Result<Vec<(Resource, Resource)>> {
+    pub fn get_parents(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
         let mut return_vec = Vec::new();
         match &from {
             Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),
@@ -162,8 +162,8 @@ impl Cache {
     // Shared id cache functions !
 
     // Exchanges Shared -> Persistent or vice-versa
-    pub fn get_associated_id(&self, input: DieselUlid) -> Option<DieselUlid> {
-        self.shared_id_cache.get(&input).map(|e| *e)
+    pub fn get_associated_id(&self, input: &DieselUlid) -> Option<DieselUlid> {
+        self.shared_id_cache.get(input).map(|e| *e)
     }
 
     pub fn add_shared(&self, shared: DieselUlid, persistent: DieselUlid) {
@@ -205,7 +205,7 @@ impl Cache {
 
     pub fn get_permissions(
         &self,
-        id: DieselUlid,
+        id: &DieselUlid,
     ) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
         let perms = self.permissions.get(&id)?;
         let mut return_vec = Vec::new();
@@ -233,13 +233,13 @@ mod tests {
 
         cache.add_shared(shared_1, persistent_1);
 
-        assert_eq!(cache.get_associated_id(shared_1).unwrap(), persistent_1);
-        assert_eq!(cache.get_associated_id(persistent_1).unwrap(), shared_1);
+        assert_eq!(cache.get_associated_id(&shared_1).unwrap(), persistent_1);
+        assert_eq!(cache.get_associated_id(&persistent_1).unwrap(), shared_1);
         assert_eq!(cache.shared_id_cache.len(), 2);
 
         cache.update_shared(shared_1, persistent_2);
-        assert_eq!(cache.get_associated_id(shared_1).unwrap(), persistent_2);
-        assert_eq!(cache.get_associated_id(persistent_2).unwrap(), shared_1);
+        assert_eq!(cache.get_associated_id(&shared_1).unwrap(), persistent_2);
+        assert_eq!(cache.get_associated_id(&persistent_2).unwrap(), shared_1);
         assert_eq!(cache.shared_id_cache.len(), 2);
     }
 
@@ -262,11 +262,11 @@ mod tests {
             .add_link(project_1.clone(), collection_1.clone())
             .unwrap();
         assert_eq!(
-            cache.get_parents(collection_1.clone()).unwrap(),
+            cache.get_parents(&collection_1).unwrap(),
             vec![(project_1.clone(), collection_1.clone())]
         );
         assert_eq!(
-            cache.traverse_graph(project_1.clone()).unwrap(),
+            cache.traverse_graph(&project_1).unwrap(),
             vec![(project_1.clone(), collection_1.clone())]
         );
         cache

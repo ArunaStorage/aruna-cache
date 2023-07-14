@@ -56,7 +56,7 @@ impl tonic::service::Interceptor for ClientInterceptor {
 
 pub struct NotificationCache {
     notification_service:
-        EventNotificationServiceClient<InterceptedService<Channel, ClientInterceptor>>,
+        Option<EventNotificationServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
     cache: Cache,
 }
 
@@ -76,7 +76,7 @@ impl NotificationCache {
             );
 
         Ok(NotificationCache {
-            notification_service,
+            notification_service: Some(notification_service),
             cache: Cache::new(),
         })
     }
@@ -84,6 +84,8 @@ impl NotificationCache {
     pub async fn create_channel(&mut self, streamgroup: String) -> Result<()> {
         let stream = self
             .notification_service
+            .as_mut()
+            .ok_or_else(|| anyhow!("Missing notification client"))?
             .get_event_message_batch_stream(Request::new(GetEventMessageBatchStreamRequest {
                 stream_group_id: streamgroup,
                 batch_size: 10,
@@ -100,6 +102,8 @@ impl NotificationCache {
                 }
             }
             self.notification_service
+                .as_mut()
+                .ok_or_else(|| anyhow!("Missing notification client"))?
                 .acknowledge_message_batch(Request::new(AcknowledgeMessageBatchRequest {
                     replies: acks,
                 }))
@@ -108,15 +112,15 @@ impl NotificationCache {
         Err(anyhow!("Stream was closed by sender"))
     }
 
-    pub fn get_associated_id(&self, input: DieselUlid) -> Option<DieselUlid> {
+    pub fn get_associated_id(&self, input: &DieselUlid) -> Option<DieselUlid> {
         self.cache.get_associated_id(input)
     }
 
-    pub fn get_parents(&self, input: Resource) -> Result<Vec<(Resource, Resource)>> {
+    pub fn get_parents(&self, input: &Resource) -> Result<Vec<(Resource, Resource)>> {
         self.cache.get_parents(input)
     }
 
-    pub fn traverse_graph(&self, input: Resource) -> Result<Vec<(Resource, Resource)>> {
+    pub fn traverse_graph(&self, input: &Resource) -> Result<Vec<(Resource, Resource)>> {
         self.cache.traverse_graph(input)
     }
 
@@ -242,7 +246,7 @@ impl NotificationCache {
     fn remove_relation(&self, inbound: bool, int: InternalRelation, res: Resource) -> Option<()> {
         let res_id = self
             .cache
-            .get_associated_id(DieselUlid::from_str(&int.resource_id).ok()?)?;
+            .get_associated_id(&DieselUlid::from_str(&int.resource_id).ok()?)?;
         if inbound {
             match int.resource_variant() {
                 ResourceVariant::Project => self
@@ -276,7 +280,7 @@ impl NotificationCache {
     fn add_relation(&self, inbound: bool, int: InternalRelation, res: Resource) -> Option<()> {
         let res_id = self
             .cache
-            .get_associated_id(DieselUlid::from_str(&int.resource_id).ok()?)?;
+            .get_associated_id(&DieselUlid::from_str(&int.resource_id).ok()?)?;
         if inbound {
             match int.resource_variant() {
                 ResourceVariant::Project => self
@@ -311,5 +315,36 @@ impl NotificationCache {
             }
         }
         Some(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
+    use aruna_rust_api::api::notification::services::v2::EventMessage;
+    use aruna_rust_api::api::notification::services::v2::ResourceEvent;
+    use diesel_ulid::DieselUlid;
+
+    use super::Cache;
+    use super::NotificationCache;
+    use super::Resource::*;
+
+    #[tokio::test]
+    async fn notification_processing_test() {
+        let not_cache = NotificationCache {
+            notification_service: None,
+            cache: Cache::new(),
+        };
+
+        not_cache
+            .process_message(EventMessage {
+                message_variant: Some(MessageVariant::ResourceEvent(ResourceEvent {
+                    resource: todo!(),
+                    event_type: todo!(),
+                    context: todo!(),
+                    reply: todo!(),
+                })),
+            })
+            .await;
     }
 }

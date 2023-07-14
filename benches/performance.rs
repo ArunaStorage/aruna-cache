@@ -30,8 +30,8 @@ async fn test_cache() {
             }
         }
     }
-    new_cache.traverse_graph(project).unwrap();
-    new_cache.get_parents(object).unwrap();
+    new_cache.traverse_graph(&project).unwrap();
+    new_cache.get_parents(&object).unwrap();
 }
 
 fn criterion_benchmark(c: &mut Criterion) {

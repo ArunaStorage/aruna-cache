@@ -321,13 +321,46 @@ impl NotificationCache {
 #[cfg(test)]
 mod tests {
     use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
+    use aruna_rust_api::api::notification::services::v2::resource_event_context::Event;
     use aruna_rust_api::api::notification::services::v2::EventMessage;
+    use aruna_rust_api::api::notification::services::v2::RelationUpdate;
+    use aruna_rust_api::api::notification::services::v2::Reply;
+    use aruna_rust_api::api::notification::services::v2::Resource;
     use aruna_rust_api::api::notification::services::v2::ResourceEvent;
+    use aruna_rust_api::api::notification::services::v2::ResourceEventContext;
+    use aruna_rust_api::api::notification::services::v2::ResourceEventType;
+    use aruna_rust_api::api::storage::models::v2::internal_relation::Variant;
+    use aruna_rust_api::api::storage::models::v2::relation;
+    use aruna_rust_api::api::storage::models::v2::InternalRelation;
+    use aruna_rust_api::api::storage::models::v2::InternalRelationVariant;
+    use aruna_rust_api::api::storage::models::v2::Relation;
+    use aruna_rust_api::api::storage::models::v2::RelationDirection;
+    use aruna_rust_api::api::storage::models::v2::ResourceVariant;
     use diesel_ulid::DieselUlid;
 
     use super::Cache;
     use super::NotificationCache;
     use super::Resource::*;
+
+    fn mtemplate(res: Resource, irel: Vec<Relation>) -> EventMessage {
+        EventMessage {
+            message_variant: Some(MessageVariant::ResourceEvent(ResourceEvent {
+                resource: Some(res),
+                event_type: ResourceEventType::Created as i32,
+                context: Some(ResourceEventContext {
+                    event: Some(Event::RelationUpdates(RelationUpdate {
+                        add_relations: irel,
+                        remove_relations: vec![],
+                    })),
+                }),
+                reply: Some(Reply {
+                    reply: "a_reply".into(),
+                    salt: "a_salt".into(),
+                    hmac: "a_hmac".into(),
+                }),
+            })),
+        }
+    }
 
     #[tokio::test]
     async fn notification_processing_test() {
@@ -336,15 +369,55 @@ mod tests {
             cache: Cache::new(),
         };
 
-        not_cache
-            .process_message(EventMessage {
-                message_variant: Some(MessageVariant::ResourceEvent(ResourceEvent {
-                    resource: todo!(),
-                    event_type: todo!(),
-                    context: todo!(),
-                    reply: todo!(),
-                })),
-            })
-            .await;
+        let id = DieselUlid::generate();
+        let aid = DieselUlid::generate();
+        let from_id = DieselUlid::generate();
+
+        let mut res = Resource {
+            resource_id: id.to_string(),
+            resource_name: "a_resource".into(),
+            associated_id: aid.to_string(),
+            resource_variant: ResourceVariant::Project as i32,
+        };
+
+        let mut irel = vec![Relation {
+            relation: Some(relation::Relation::Internal(InternalRelation {
+                resource_id: from_id.to_string(),
+                resource_variant: ResourceVariant::Project.into(),
+                direction: RelationDirection::Inbound.into(),
+                variant: Some(Variant::DefinedVariant(
+                    InternalRelationVariant::BelongsTo.into(),
+                )),
+            })),
+        }];
+
+        {
+            let irel = Vec::new();
+            let reply = not_cache
+                .process_message(mtemplate(res.clone(), irel.clone()))
+                .await
+                .unwrap();
+            assert_eq!(
+                reply,
+                Reply {
+                    reply: "a_reply".into(),
+                    salt: "a_salt".into(),
+                    hmac: "a_hmac".into(),
+                }
+            );
+            res.resource_variant = ResourceVariant::Object.into();
+            let reply = not_cache
+                .process_message(mtemplate(res.clone(), irel))
+                .await
+                .unwrap();
+            assert_eq!(
+                reply,
+                Reply {
+                    reply: "a_reply".into(),
+                    salt: "a_salt".into(),
+                    hmac: "a_hmac".into(),
+                }
+            );
+        }
     }
 }

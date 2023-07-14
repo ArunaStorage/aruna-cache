@@ -29,7 +29,6 @@ impl GetRef for ApiResource {
                 Resource::Dataset(DieselUlid::from_str(&self.resource_id).ok()?),
             ),
             _ => return None,
-            ResourceVariant::Unspecified => todo!(),
         };
 
         Some((associated_id, res))

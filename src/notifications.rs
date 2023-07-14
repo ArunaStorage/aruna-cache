@@ -14,7 +14,9 @@ use aruna_rust_api::api::notification::services::v2::RelationUpdate;
 use aruna_rust_api::api::notification::services::v2::Reply;
 use aruna_rust_api::api::notification::services::v2::ResourceEvent;
 use aruna_rust_api::api::notification::services::v2::ResourceEventType;
+use aruna_rust_api::api::storage::models::v2::internal_relation::Variant;
 use aruna_rust_api::api::storage::models::v2::relation::Relation;
+use aruna_rust_api::api::storage::models::v2::InternalRelation;
 use aruna_rust_api::api::storage::models::v2::RelationDirection;
 use aruna_rust_api::api::storage::models::v2::ResourceVariant;
 use diesel_ulid::DieselUlid;
@@ -152,38 +154,109 @@ impl NotificationCache {
     pub fn process_relation_update(&self, res: Resource, update: RelationUpdate) -> Option<()> {
         for rel in update.add_relations {
             if let Some(Relation::Internal(int)) = rel.relation {
-                if int.direction() == RelationDirection::Inbound {
-                    match int.resource_variant() {
-                        ResourceVariant::Project => self
-                            .cache
-                            .add_link(
-                                Resource::Project(self.cache.get_associated_id(
-                                    DieselUlid::from_str(&int.resource_id).ok()?,
-                                )?),
-                                res.clone(),
-                            )
-                            .ok()?,
-                        ResourceVariant::Collection => self
-                            .cache
-                            .add_link(
-                                Resource::Collection(self.cache.get_associated_id(
-                                    DieselUlid::from_str(&int.resource_id).ok()?,
-                                )?),
-                                res.clone(),
-                            )
-                            .ok()?,
-                        ResourceVariant::Dataset => self
-                            .cache
-                            .add_link(
-                                Resource::Dataset(self.cache.get_associated_id(
-                                    DieselUlid::from_str(&int.resource_id).ok()?,
-                                )?),
-                                res.clone(),
-                            )
-                            .ok()?,
-                        _ => (),
+                if let Some(Variant::DefinedVariant(1)) = int.variant {
+                    match int.direction() {
+                        RelationDirection::Inbound => self.add_relation(true, int, res.clone())?,
+                        RelationDirection::Outbound => {
+                            self.add_relation(false, int, res.clone())?
+                        }
+                        _ => return None,
                     }
                 }
+            }
+        }
+        for rel in update.remove_relations {
+            if let Some(Relation::Internal(int)) = rel.relation {
+                if let Some(Variant::DefinedVariant(1)) = int.variant {
+                    match int.direction() {
+                        RelationDirection::Inbound => {
+                            self.remove_relation(true, int, res.clone())?
+                        }
+                        RelationDirection::Outbound => {
+                            self.remove_relation(false, int, res.clone())?
+                        }
+                        _ => return None,
+                    }
+                }
+            }
+        }
+        Some(())
+    }
+
+    pub fn remove_relation(
+        &self,
+        inbound: bool,
+        int: InternalRelation,
+        res: Resource,
+    ) -> Option<()> {
+        let res_id = self
+            .cache
+            .get_associated_id(DieselUlid::from_str(&int.resource_id).ok()?)?;
+        if inbound {
+            match int.resource_variant() {
+                ResourceVariant::Project => self
+                    .cache
+                    .remove_link(Resource::Project(res_id), res.clone()),
+                ResourceVariant::Collection => self
+                    .cache
+                    .remove_link(Resource::Collection(res_id), res.clone()),
+                ResourceVariant::Dataset => self
+                    .cache
+                    .remove_link(Resource::Dataset(res_id), res.clone()),
+                _ => (),
+            }
+        } else {
+            match int.resource_variant() {
+                ResourceVariant::Collection => self
+                    .cache
+                    .remove_link(res.clone(), Resource::Project(res_id)),
+                ResourceVariant::Dataset => self
+                    .cache
+                    .remove_link(res.clone(), Resource::Collection(res_id)),
+                ResourceVariant::Object => self
+                    .cache
+                    .remove_link(res.clone(), Resource::Dataset(res_id)),
+                _ => (),
+            }
+        }
+        Some(())
+    }
+
+    pub fn add_relation(&self, inbound: bool, int: InternalRelation, res: Resource) -> Option<()> {
+        let res_id = self
+            .cache
+            .get_associated_id(DieselUlid::from_str(&int.resource_id).ok()?)?;
+        if inbound {
+            match int.resource_variant() {
+                ResourceVariant::Project => self
+                    .cache
+                    .add_link(Resource::Project(res_id), res.clone())
+                    .ok()?,
+                ResourceVariant::Collection => self
+                    .cache
+                    .add_link(Resource::Collection(res_id), res.clone())
+                    .ok()?,
+                ResourceVariant::Dataset => self
+                    .cache
+                    .add_link(Resource::Dataset(res_id), res.clone())
+                    .ok()?,
+                _ => (),
+            }
+        } else {
+            match int.resource_variant() {
+                ResourceVariant::Collection => self
+                    .cache
+                    .add_link(res.clone(), Resource::Project(res_id))
+                    .ok()?,
+                ResourceVariant::Dataset => self
+                    .cache
+                    .add_link(res.clone(), Resource::Collection(res_id))
+                    .ok()?,
+                ResourceVariant::Object => self
+                    .cache
+                    .add_link(res.clone(), Resource::Dataset(res_id))
+                    .ok()?,
+                _ => (),
             }
         }
         Some(())

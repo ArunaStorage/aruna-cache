@@ -244,7 +244,8 @@ impl NotificationCache {
     }
 
     fn remove_relation(&self, inbound: bool, int: InternalRelation, res: Resource) -> Option<()> {
-        let res_id = self
+        let res_id = DieselUlid::from_str(&int.resource_id).ok()?;
+        let a_res_id = self
             .cache
             .get_associated_id(&DieselUlid::from_str(&int.resource_id).ok()?)?;
         if inbound {
@@ -270,7 +271,7 @@ impl NotificationCache {
                     .remove_link(res.clone(), Resource::Dataset(res_id)),
                 ResourceVariant::Object => self
                     .cache
-                    .remove_link(res.clone(), Resource::Object(DieselUlid::from_str(&int.resource_id).ok()?)),
+                    .remove_link(res.clone(), Resource::Object(a_res_id)),
                 _ => (),
             }
         }
@@ -278,7 +279,8 @@ impl NotificationCache {
     }
 
     fn add_relation(&self, inbound: bool, int: InternalRelation, res: Resource) -> Option<()> {
-        let res_id = self
+        let res_id = DieselUlid::from_str(&int.resource_id).ok()?;
+        let a_res_id = self
             .cache
             .get_associated_id(&DieselUlid::from_str(&int.resource_id).ok()?)?;
         if inbound {
@@ -309,7 +311,7 @@ impl NotificationCache {
                     .ok()?,
                 ResourceVariant::Object => self
                     .cache
-                    .add_link(res.clone(), Resource::Object(DieselUlid::from_str(&int.resource_id).ok()?))
+                    .add_link(res.clone(), Resource::Object(a_res_id))
                     .ok()?,
                 _ => (),
             }
@@ -380,9 +382,9 @@ mod tests {
 
         let irel = vec![Relation {
             relation: Some(relation::Relation::Internal(InternalRelation {
-                resource_id: id.to_string(),
-                resource_variant: ResourceVariant::Object.into(),
-                direction: RelationDirection::Outbound.into(),
+                resource_id: aid.to_string(),
+                resource_variant: ResourceVariant::Project.into(),
+                direction: RelationDirection::Inbound.into(),
                 variant: Some(Variant::DefinedVariant(
                     InternalRelationVariant::BelongsTo.into(),
                 )),
@@ -428,7 +430,14 @@ mod tests {
         assert_eq!(not_cache.get_associated_id(&res_id).unwrap(), as_id);
         assert_eq!(not_cache.get_associated_id(&as_id).unwrap(), res_id);
 
-        //dbg!(&not_cache.cache.graph_cache);
-        assert!(not_cache.get_parents(&crate::structs::Resource::Object(id.clone())).unwrap().len() == 1);
+        dbg!(&not_cache.cache.graph_cache);
+        assert_eq!(
+            not_cache
+                .get_parents(&crate::structs::Resource::Object(res_id.clone()))
+                .unwrap(),
+            not_cache
+                .traverse_graph(&crate::structs::Resource::Project(aid))
+                .unwrap()
+        );
     }
 }

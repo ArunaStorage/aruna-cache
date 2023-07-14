@@ -26,7 +26,7 @@ impl GetRef for ApiResource {
             ),
             ResourceVariant::Object => (
                 DieselUlid::from_str(&self.associated_id).ok()?,
-                Resource::Dataset(DieselUlid::from_str(&self.resource_id).ok()?),
+                Resource::Object(DieselUlid::from_str(&self.resource_id).ok()?),
             ),
             _ => return None,
         };

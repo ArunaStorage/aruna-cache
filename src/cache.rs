@@ -127,8 +127,16 @@ impl Cache {
         self.name_cache.entry(name).or_default().insert(res);
     }
 
-    pub fn remove_name(&self, res: Resource, name: String) {
-        self.name_cache.entry(name).or_default().remove(&res);
+    pub fn remove_name(&self, res: Resource, name: Option<String>) {
+        if let Some(name) = name {
+            self.name_cache.entry(name).or_default().remove(&res);
+        } else {
+            for ent in self.name_cache.iter() {
+                if ent.value().contains(&res) {
+                    ent.value().remove(&res);
+                }
+            }
+        }
     }
 
     pub fn add_link(&self, from: Resource, to: Resource) -> Result<()> {

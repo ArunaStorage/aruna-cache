@@ -19,7 +19,6 @@ pub struct Cache {
     pub permissions:
         DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
     pub pubkeys: DashSet<PubKey, RandomState>,
-        
 }
 
 impl Default for Cache {

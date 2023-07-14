@@ -270,7 +270,7 @@ impl NotificationCache {
                     .remove_link(res.clone(), Resource::Dataset(res_id)),
                 ResourceVariant::Object => self
                     .cache
-                    .remove_link(res.clone(), Resource::Object(res_id)),
+                    .remove_link(res.clone(), Resource::Object(DieselUlid::from_str(&int.resource_id).ok()?)),
                 _ => (),
             }
         }
@@ -309,7 +309,7 @@ impl NotificationCache {
                     .ok()?,
                 ResourceVariant::Object => self
                     .cache
-                    .add_link(res.clone(), Resource::Object(res_id))
+                    .add_link(res.clone(), Resource::Object(DieselUlid::from_str(&int.resource_id).ok()?))
                     .ok()?,
                 _ => (),
             }
@@ -381,7 +381,7 @@ mod tests {
         let irel = vec![Relation {
             relation: Some(relation::Relation::Internal(InternalRelation {
                 resource_id: id.to_string(),
-                resource_variant: ResourceVariant::Project.into(),
+                resource_variant: ResourceVariant::Object.into(),
                 direction: RelationDirection::Outbound.into(),
                 variant: Some(Variant::DefinedVariant(
                     InternalRelationVariant::BelongsTo.into(),
@@ -429,6 +429,6 @@ mod tests {
         assert_eq!(not_cache.get_associated_id(&as_id).unwrap(), res_id);
 
         //dbg!(&not_cache.cache.graph_cache);
-        //assert!(not_cache.get_parents(&crate::structs::Resource::Object(id.clone())).unwrap().len() == 1);
+        assert!(not_cache.get_parents(&crate::structs::Resource::Object(id.clone())).unwrap().len() == 1);
     }
 }

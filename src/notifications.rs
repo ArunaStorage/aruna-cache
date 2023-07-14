@@ -1,17 +1,29 @@
+use std::str::FromStr;
+
 use anyhow::anyhow;
 use anyhow::Result;
 use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
 use aruna_rust_api::api::notification::services::v2::event_notification_service_client::{
     self, EventNotificationServiceClient,
 };
+use aruna_rust_api::api::notification::services::v2::resource_event_context::Event;
 use aruna_rust_api::api::notification::services::v2::AcknowledgeMessageBatchRequest;
 use aruna_rust_api::api::notification::services::v2::EventMessage;
 use aruna_rust_api::api::notification::services::v2::GetEventMessageBatchStreamRequest;
 use aruna_rust_api::api::notification::services::v2::Reply;
+use aruna_rust_api::api::notification::services::v2::ResourceEvent;
+use aruna_rust_api::api::notification::services::v2::ResourceEventType;
+use aruna_rust_api::api::storage::models::v2::relation::Relation;
+use aruna_rust_api::api::storage::models::v2::RelationDirection;
+use aruna_rust_api::api::storage::models::v2::ResourceVariant;
+use diesel_ulid::DieselUlid;
 use tonic::codegen::InterceptedService;
 use tonic::metadata::{AsciiMetadataKey, AsciiMetadataValue};
 use tonic::transport::{Channel, ClientTlsConfig};
 use tonic::Request;
+
+use crate::cache::Cache;
+use crate::structs::Resource;
 
 // Create a client interceptor which always adds the specified api token to the request header
 #[derive(Clone)]
@@ -36,6 +48,7 @@ impl tonic::service::Interceptor for ClientInterceptor {
 pub struct NotificationCache {
     notification_service:
         EventNotificationServiceClient<InterceptedService<Channel, ClientInterceptor>>,
+    cache: Cache,
 }
 
 impl NotificationCache {
@@ -55,6 +68,7 @@ impl NotificationCache {
 
         Ok(NotificationCache {
             notification_service: notification_service,
+            cache: Cache::new(),
         })
     }
 
@@ -73,7 +87,9 @@ impl NotificationCache {
             if let Some(m) = inner_stream.message().await? {
                 let mut acks = Vec::new();
                 for message in m.messages {
-                    acks.push(self.process_message(message).await);
+                    if let Some(r) = self.process_message(message).await {
+                        acks.push(r)
+                    }
                 }
                 self.notification_service
                     .acknowledge_message_batch(Request::new(AcknowledgeMessageBatchRequest {
@@ -88,11 +104,100 @@ impl NotificationCache {
         Err(anyhow!("Stream was closed by sender"))
     }
 
-    pub async fn process_message(&self, message: EventMessage) -> Reply {
+    pub async fn process_message(&self, message: EventMessage) -> Option<Reply> {
         match message.message_variant.unwrap() {
-            MessageVariant::ResourceEvent(r_event) => r_event.reply.unwrap(),
-            MessageVariant::UserEvent(u_event) => u_event.reply.unwrap(),
-            MessageVariant::AnnouncementEvent(a_event) => a_event.reply.unwrap(),
+            MessageVariant::ResourceEvent(r_event) => self.process_resource_event(r_event).await,
+            MessageVariant::UserEvent(u_event) => return u_event.reply,
+            MessageVariant::AnnouncementEvent(a_event) => return a_event.reply,
         }
+    }
+
+    pub async fn process_resource_event(&self, event: ResourceEvent) -> Option<Reply> {
+        match event.event_type() {
+            ResourceEventType::Created => {
+                if let Some(r) = event.resource {
+                    let (associated_id, res) = match r.resource_variant() {
+                        aruna_rust_api::api::storage::models::v2::ResourceVariant::Project => (
+                            DieselUlid::from_str(&r.resource_id).ok()?,
+                            Resource::Project(DieselUlid::from_str(&r.associated_id).ok()?),
+                        ),
+                        aruna_rust_api::api::storage::models::v2::ResourceVariant::Collection => (
+                            DieselUlid::from_str(&r.resource_id).ok()?,
+                            Resource::Collection(DieselUlid::from_str(&r.associated_id).ok()?),
+                        ),
+                        aruna_rust_api::api::storage::models::v2::ResourceVariant::Dataset => (
+                            DieselUlid::from_str(&r.resource_id).ok()?,
+                            Resource::Dataset(DieselUlid::from_str(&r.associated_id).ok()?),
+                        ),
+                        aruna_rust_api::api::storage::models::v2::ResourceVariant::Object => (
+                            DieselUlid::from_str(&r.associated_id).ok()?,
+                            Resource::Dataset(DieselUlid::from_str(&r.resource_id).ok()?),
+                        ),
+                        _ => return None,
+                    };
+                    if let Some(ctx) = event.context {
+                        if let Some(i) = ctx.event {
+                            match i {
+                                Event::RelationUpdates(new_relations) => {
+                                    for rel in new_relations.add_relations {
+                                        if let Some(i_rel) = rel.relation {
+                                            match i_rel {
+                                                Relation::Internal(int) => {
+                                                    match int.direction() {
+                                                        RelationDirection::Inbound => {
+                                                            match int.resource_variant() {
+                                                                ResourceVariant::Project => {
+                                                                    self.cache.add_link(
+                                                                        Resource::Project(
+                                                                            self.cache.get_associated_id(
+                                                                                DieselUlid::from_str(&int.resource_id).ok()?
+                                                                            )?
+                                                                        ),
+                                                                        res.clone()).ok()?
+                                                                    },
+                                                                ResourceVariant::Collection => {
+                                                                    self.cache.add_link(
+                                                                        Resource::Collection(
+                                                                            self.cache.get_associated_id(
+                                                                                DieselUlid::from_str(&int.resource_id).ok()?
+                                                                            )?
+                                                                        ),
+                                                                        res.clone()).ok()?
+                                                                    },
+                                                                ResourceVariant::Dataset => {
+                                                                    self.cache.add_link(
+                                                                        Resource::Dataset(
+                                                                            self.cache.get_associated_id(
+                                                                                DieselUlid::from_str(&int.resource_id).ok()?
+                                                                            )?
+                                                                        ),
+                                                                        res.clone()).ok()?
+                                                                    },
+                                                                _ => ()
+                                                        }
+                                                        }
+                                                        _ => (),
+                                                    }
+                                                }
+                                                _ => (),
+                                            }
+                                        }
+                                    }
+                                }
+                                _ => (),
+                            }
+                        }
+                    }
+                    self.cache.add_shared(associated_id.clone(), res.get_id());
+                    self.cache.add_name(res, r.resource_name);
+                }
+            }
+            ResourceEventType::Available => {}
+            ResourceEventType::Updated => {}
+            ResourceEventType::Deleted => {}
+            _ => (),
+        }
+
+        event.reply
     }
 }

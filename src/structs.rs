@@ -11,10 +11,10 @@ pub enum Resource {
 impl Resource {
     pub fn get_id(&self) -> DieselUlid {
         match self {
-            Resource::Project(i) => i.clone(),
-            Resource::Collection(i) => i.clone(),
-            Resource::Dataset(i) => i.clone(),
-            Resource::Object(i) => i.clone(),
+            Resource::Project(i) => *i,
+            Resource::Collection(i) => *i,
+            Resource::Dataset(i) => *i,
+            Resource::Object(i) => *i,
         }
     }
 }

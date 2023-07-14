@@ -41,7 +41,7 @@ impl tonic::service::Interceptor for ClientInterceptor {
             AsciiMetadataValue::try_from(format!("Bearer {}", self.api_token.as_str())).unwrap(),
         );
 
-        return Ok(mut_req);
+        Ok(mut_req)
     }
 }
 
@@ -67,7 +67,7 @@ impl NotificationCache {
             );
 
         Ok(NotificationCache {
-            notification_service: notification_service,
+            notification_service,
             cache: Cache::new(),
         })
     }
@@ -83,32 +83,27 @@ impl NotificationCache {
 
         let mut inner_stream = stream.into_inner();
 
-        loop {
-            if let Some(m) = inner_stream.message().await? {
-                let mut acks = Vec::new();
-                for message in m.messages {
-                    if let Some(r) = self.process_message(message).await {
-                        acks.push(r)
-                    }
+        while let Some(m) = inner_stream.message().await? {
+            let mut acks = Vec::new();
+            for message in m.messages {
+                if let Some(r) = self.process_message(message).await {
+                    acks.push(r)
                 }
-                self.notification_service
-                    .acknowledge_message_batch(Request::new(AcknowledgeMessageBatchRequest {
-                        replies: acks,
-                    }))
-                    .await?;
-            } else {
-                break;
             }
+            self.notification_service
+                .acknowledge_message_batch(Request::new(AcknowledgeMessageBatchRequest {
+                    replies: acks,
+                }))
+                .await?;
         }
-
         Err(anyhow!("Stream was closed by sender"))
     }
 
     pub async fn process_message(&self, message: EventMessage) -> Option<Reply> {
         match message.message_variant.unwrap() {
             MessageVariant::ResourceEvent(r_event) => self.process_resource_event(r_event).await,
-            MessageVariant::UserEvent(u_event) => return u_event.reply,
-            MessageVariant::AnnouncementEvent(a_event) => return a_event.reply,
+            MessageVariant::UserEvent(u_event) => u_event.reply,
+            MessageVariant::AnnouncementEvent(a_event) => a_event.reply,
         }
     }
 
@@ -136,59 +131,55 @@ impl NotificationCache {
                         _ => return None,
                     };
                     if let Some(ctx) = event.context {
-                        if let Some(i) = ctx.event {
-                            match i {
-                                Event::RelationUpdates(new_relations) => {
-                                    for rel in new_relations.add_relations {
-                                        if let Some(i_rel) = rel.relation {
-                                            match i_rel {
-                                                Relation::Internal(int) => {
-                                                    match int.direction() {
-                                                        RelationDirection::Inbound => {
-                                                            match int.resource_variant() {
-                                                                ResourceVariant::Project => {
-                                                                    self.cache.add_link(
-                                                                        Resource::Project(
-                                                                            self.cache.get_associated_id(
-                                                                                DieselUlid::from_str(&int.resource_id).ok()?
-                                                                            )?
-                                                                        ),
-                                                                        res.clone()).ok()?
-                                                                    },
-                                                                ResourceVariant::Collection => {
-                                                                    self.cache.add_link(
-                                                                        Resource::Collection(
-                                                                            self.cache.get_associated_id(
-                                                                                DieselUlid::from_str(&int.resource_id).ok()?
-                                                                            )?
-                                                                        ),
-                                                                        res.clone()).ok()?
-                                                                    },
-                                                                ResourceVariant::Dataset => {
-                                                                    self.cache.add_link(
-                                                                        Resource::Dataset(
-                                                                            self.cache.get_associated_id(
-                                                                                DieselUlid::from_str(&int.resource_id).ok()?
-                                                                            )?
-                                                                        ),
-                                                                        res.clone()).ok()?
-                                                                    },
-                                                                _ => ()
-                                                        }
-                                                        }
-                                                        _ => (),
-                                                    }
-                                                }
-                                                _ => (),
-                                            }
+                        if let Some(Event::RelationUpdates(new_relations)) = ctx.event {
+                            for rel in new_relations.add_relations {
+                                if let Some(Relation::Internal(int)) = rel.relation {
+                                    if int.direction() == RelationDirection::Inbound {
+                                        match int.resource_variant() {
+                                            ResourceVariant::Project => self
+                                                .cache
+                                                .add_link(
+                                                    Resource::Project(
+                                                        self.cache.get_associated_id(
+                                                            DieselUlid::from_str(&int.resource_id)
+                                                                .ok()?,
+                                                        )?,
+                                                    ),
+                                                    res.clone(),
+                                                )
+                                                .ok()?,
+                                            ResourceVariant::Collection => self
+                                                .cache
+                                                .add_link(
+                                                    Resource::Collection(
+                                                        self.cache.get_associated_id(
+                                                            DieselUlid::from_str(&int.resource_id)
+                                                                .ok()?,
+                                                        )?,
+                                                    ),
+                                                    res.clone(),
+                                                )
+                                                .ok()?,
+                                            ResourceVariant::Dataset => self
+                                                .cache
+                                                .add_link(
+                                                    Resource::Dataset(
+                                                        self.cache.get_associated_id(
+                                                            DieselUlid::from_str(&int.resource_id)
+                                                                .ok()?,
+                                                        )?,
+                                                    ),
+                                                    res.clone(),
+                                                )
+                                                .ok()?,
+                                            _ => (),
                                         }
                                     }
                                 }
-                                _ => (),
                             }
                         }
                     }
-                    self.cache.add_shared(associated_id.clone(), res.get_id());
+                    self.cache.add_shared(associated_id, res.get_id());
                     self.cache.add_name(res, r.resource_name);
                 }
             }

@@ -10,6 +10,7 @@ use diesel_ulid::DieselUlid;
 
 #[derive(Debug)]
 pub struct Cache {
+    // TODO: PATH caching
     // Graph cache contains From -> [all]
     pub graph_cache: DashMap<Resource, DashSet<Resource, RandomState>, RandomState>,
     pub shared_id_cache: DashMap<DieselUlid, DieselUlid, RandomState>,
@@ -62,6 +63,7 @@ impl Cache {
                 for ref_val in self.graph_cache.iter() {
                     if ref_val.value().contains(&from) {
                         return_vec.push((ref_val.key().clone(), from.clone()));
+                        break;
                     }
                 }
                 if return_vec.is_empty() {
@@ -74,9 +76,11 @@ impl Cache {
                         for ref2_val in self.graph_cache.iter() {
                             if ref2_val.value().contains(&ref1_val.key()) {
                                 return_vec.push((ref2_val.key().clone(), ref1_val.key().clone()));
+                                break;
                             }
                         }
                         return_vec.push((ref1_val.key().clone(), from.clone()));
+                        break;
                     }
                 }
                 if return_vec.is_empty() {
@@ -92,12 +96,15 @@ impl Cache {
                                     if ref3_val.value().contains(&ref2_val.key()) {
                                         return_vec
                                             .push((ref3_val.key().clone(), ref2_val.key().clone()));
+                                        break;
                                     }
                                 }
                             }
                             return_vec.push((ref2_val.key().clone(), ref1_val.key().clone()));
+                            break;
                         }
                         return_vec.push((ref1_val.key().clone(), from.clone()));
+                        break;
                     }
                 }
 

@@ -7,8 +7,6 @@ use diesel_ulid::DieselUlid;
 pub fn main () {
 
     let new_cache = Cache::new();
-
-
     let mut start = Instant::now();
     let mut project = Project(DieselUlid::generate());
     let mut object = Object(DieselUlid::generate());
@@ -27,8 +25,13 @@ pub fn main () {
                 }
             }
         }
+
+        for a in 0..1000000 {
+            object = Object(DieselUlid::generate());
+            new_cache.add_link(project.clone(), object.clone()).unwrap();
+        }
     }
-    println!("Took {} ms to create 12.5 Mio nodes", start.elapsed().as_millis());
+    println!("Took {} ms to create 12.5 M + 50 M extra nodes", start.elapsed().as_millis());
     start = Instant::now();
     new_cache.traverse_graph(project).unwrap();
     println!("Took {} ms to traverse subgraph", start.elapsed().as_millis());

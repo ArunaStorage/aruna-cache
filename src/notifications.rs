@@ -7,6 +7,7 @@ use aruna_rust_api::api::notification::services::v2::event_notification_service_
     self, EventNotificationServiceClient,
 };
 use aruna_rust_api::api::notification::services::v2::resource_event_context::Event;
+use aruna_rust_api::api::notification::services::v2::user_event_context;
 use aruna_rust_api::api::notification::services::v2::AcknowledgeMessageBatchRequest;
 use aruna_rust_api::api::notification::services::v2::EventMessage;
 use aruna_rust_api::api::notification::services::v2::GetEventMessageBatchStreamRequest;
@@ -14,9 +15,12 @@ use aruna_rust_api::api::notification::services::v2::RelationUpdate;
 use aruna_rust_api::api::notification::services::v2::Reply;
 use aruna_rust_api::api::notification::services::v2::ResourceEvent;
 use aruna_rust_api::api::notification::services::v2::ResourceEventType;
+use aruna_rust_api::api::notification::services::v2::UserEvent;
+use aruna_rust_api::api::notification::services::v2::UserEventType;
 use aruna_rust_api::api::storage::models::v2::internal_relation::Variant;
 use aruna_rust_api::api::storage::models::v2::relation::Relation;
 use aruna_rust_api::api::storage::models::v2::InternalRelation;
+use aruna_rust_api::api::storage::models::v2::PermissionLevel;
 use aruna_rust_api::api::storage::models::v2::RelationDirection;
 use aruna_rust_api::api::storage::models::v2::ResourceVariant;
 use diesel_ulid::DieselUlid;
@@ -27,6 +31,7 @@ use tonic::Request;
 
 use crate::cache::Cache;
 use crate::structs::Resource;
+use crate::structs::ResourcePermission;
 use crate::utils::GetRef;
 
 // Create a client interceptor which always adds the specified api token to the request header
@@ -118,9 +123,48 @@ impl NotificationCache {
     async fn process_message(&self, message: EventMessage) -> Option<Reply> {
         match message.message_variant.unwrap() {
             MessageVariant::ResourceEvent(r_event) => self.process_resource_event(r_event).await,
-            MessageVariant::UserEvent(u_event) => u_event.reply,
+            MessageVariant::UserEvent(u_event) => self.process_user_event(u_event).await,
             MessageVariant::AnnouncementEvent(a_event) => a_event.reply,
         }
+    }
+
+    async fn process_user_event(&self, message: UserEvent) -> Option<Reply> {
+        match message.event_type() {
+            UserEventType::Created => {
+                if let Some(ctx) = message.context {
+                    if let Some(e) = ctx.event {
+                        match e {
+                            user_event_context::Event::Admin(_) => {
+                                self.cache.add_or_update_permission(
+                                    DieselUlid::from_str(&message.user_id).ok()?,
+                                    (ResourcePermission::GlobalAdmin, PermissionLevel::Admin),
+                                )
+                            }
+                            user_event_context::Event::Token(t) => {
+                                if let Some(p) = t.permission {
+                                    if let Some(r) = p.resource_id {
+                                        self.cache.add_or_update_permission(
+                                            DieselUlid::from_str(&t.id).ok()?,
+                                            (
+                                                Resource::try_from(r).ok()?.into(),
+                                                PermissionLevel::Admin,
+                                            ),
+                                        )
+                                    }
+                                }
+                            }
+                            user_event_context::Event::Permission(_) => todo!(),
+                            _ => (),
+                        }
+                    }
+                }
+            }
+            UserEventType::Updated => todo!(),
+            UserEventType::Deleted => todo!(),
+            _ => (),
+        }
+
+        message.reply
     }
 
     async fn process_resource_event(&self, event: ResourceEvent) -> Option<Reply> {

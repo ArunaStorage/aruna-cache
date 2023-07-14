@@ -196,11 +196,9 @@ impl Cache {
     ) {
         if full_entry {
             self.permissions.remove(&id);
-        } else {
-            if let Some(e) = self.permissions.get_mut(&id) {
-                if let Some(p) = res {
-                    e.remove(&p);
-                }
+        } else if let Some(e) = self.permissions.get_mut(&id) {
+            if let Some(p) = res {
+                e.remove(&p);
             }
         }
     }
@@ -212,7 +210,7 @@ impl Cache {
         let perms = self.permissions.get(&id)?;
         let mut return_vec = Vec::new();
         for x in perms.value() {
-            return_vec.push((x.key().clone(), x.value().clone()))
+            return_vec.push((x.key().clone(), *x.value()))
         }
         Some(return_vec)
     }

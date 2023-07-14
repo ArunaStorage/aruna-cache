@@ -103,7 +103,19 @@ impl NotificationCache {
         Err(anyhow!("Stream was closed by sender"))
     }
 
-    pub async fn process_message(&self, message: EventMessage) -> Option<Reply> {
+    pub fn get_associated_id(&self, input: DieselUlid) -> Option<DieselUlid> {
+        self.cache.get_associated_id(input)
+    }
+
+    pub fn get_parents(&self, input: Resource) -> Result<Vec<(Resource, Resource)>> {
+        self.cache.get_parents(input)
+    }
+
+    pub fn traverse_graph(&self, input: Resource) -> Result<Vec<(Resource, Resource)>> {
+        self.cache.traverse_graph(input)
+    }
+
+    async fn process_message(&self, message: EventMessage) -> Option<Reply> {
         match message.message_variant.unwrap() {
             MessageVariant::ResourceEvent(r_event) => self.process_resource_event(r_event).await,
             MessageVariant::UserEvent(u_event) => u_event.reply,
@@ -111,7 +123,7 @@ impl NotificationCache {
         }
     }
 
-    pub async fn process_resource_event(&self, event: ResourceEvent) -> Option<Reply> {
+    async fn process_resource_event(&self, event: ResourceEvent) -> Option<Reply> {
         match event.event_type() {
             ResourceEventType::Created => {
                 if let Some(r) = event.resource {
@@ -151,7 +163,7 @@ impl NotificationCache {
         event.reply
     }
 
-    pub fn process_relation_update(&self, res: Resource, update: RelationUpdate) -> Option<()> {
+    fn process_relation_update(&self, res: Resource, update: RelationUpdate) -> Option<()> {
         for rel in update.add_relations {
             if let Some(Relation::Internal(int)) = rel.relation {
                 if let Some(Variant::DefinedVariant(1)) = int.variant {
@@ -183,12 +195,7 @@ impl NotificationCache {
         Some(())
     }
 
-    pub fn remove_relation(
-        &self,
-        inbound: bool,
-        int: InternalRelation,
-        res: Resource,
-    ) -> Option<()> {
+    fn remove_relation(&self, inbound: bool, int: InternalRelation, res: Resource) -> Option<()> {
         let res_id = self
             .cache
             .get_associated_id(DieselUlid::from_str(&int.resource_id).ok()?)?;
@@ -222,7 +229,7 @@ impl NotificationCache {
         Some(())
     }
 
-    pub fn add_relation(&self, inbound: bool, int: InternalRelation, res: Resource) -> Option<()> {
+    fn add_relation(&self, inbound: bool, int: InternalRelation, res: Resource) -> Option<()> {
         let res_id = self
             .cache
             .get_associated_id(DieselUlid::from_str(&int.resource_id).ok()?)?;

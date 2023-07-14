@@ -178,6 +178,44 @@ impl Cache {
         }
         self.shared_id_cache.insert(new_persistent, shared);
     }
+
+    pub fn add_or_update_permission(
+        &self,
+        id: DieselUlid,
+        perm: (ResourcePermission, PermissionLevel),
+    ) {
+        let entry = self.permissions.entry(id).or_default();
+        entry.insert(perm.0, perm.1);
+    }
+
+    pub fn remove_permission(
+        &self,
+        id: DieselUlid,
+        res: Option<ResourcePermission>,
+        full_entry: bool,
+    ) {
+        if full_entry {
+            self.permissions.remove(&id);
+        } else {
+            if let Some(e) = self.permissions.get_mut(&id) {
+                if let Some(p) = res {
+                    e.remove(&p);
+                }
+            }
+        }
+    }
+
+    pub fn get_permissions(
+        &self,
+        id: DieselUlid,
+    ) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
+        let perms = self.permissions.get(&id)?;
+        let mut return_vec = Vec::new();
+        for x in perms.value() {
+            return_vec.push((x.key().clone(), x.value().clone()))
+        }
+        Some(return_vec)
+    }
 }
 
 #[cfg(test)]

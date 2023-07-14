@@ -19,7 +19,7 @@ impl Resource {
     }
 }
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Hash)]
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Hash, Clone)]
 pub enum ResourcePermission {
     Resource,
     GlobalAdmin,

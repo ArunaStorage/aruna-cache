@@ -19,6 +19,12 @@ pub struct Cache {
         DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
 }
 
+impl Default for Cache {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Cache {
     pub fn new() -> Self {
         Cache {
@@ -59,8 +65,8 @@ impl Cache {
     pub fn get_parents(&self, from: Resource) -> Result<Vec<(Resource, Resource)>> {
         let mut return_vec = Vec::new();
         match &from {
-            &Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),
-            &Resource::Collection(_) => {
+            Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),
+            Resource::Collection(_) => {
                 for ref_val in self.graph_cache.iter() {
                     if ref_val.value().contains(&from) {
                         return_vec.push((ref_val.key().clone(), from.clone()));
@@ -71,11 +77,11 @@ impl Cache {
                     return Err(anyhow!("Cannot find from resource: {:#?}", &from));
                 }
             }
-            &Resource::Dataset(_) => {
+            Resource::Dataset(_) => {
                 for ref1_val in self.graph_cache.iter() {
                     if ref1_val.value().contains(&from) {
                         for ref2_val in self.graph_cache.iter() {
-                            if ref2_val.value().contains(&ref1_val.key()) {
+                            if ref2_val.value().contains(ref1_val.key()) {
                                 return_vec.push((ref2_val.key().clone(), ref1_val.key().clone()));
                                 break;
                             }
@@ -88,21 +94,21 @@ impl Cache {
                     return Err(anyhow!("Cannot find from resource: {:#?}", &from));
                 }
             }
-            &Resource::Object(_) => {
+            Resource::Object(_) => {
                 for ref1_val in self.graph_cache.iter() {
                     if ref1_val.value().contains(&from) {
                         for ref2_val in self.graph_cache.iter() {
-                            if ref2_val.value().contains(&ref1_val.key()) {
+                            if ref2_val.value().contains(ref1_val.key()) {
                                 for ref3_val in self.graph_cache.iter() {
-                                    if ref3_val.value().contains(&ref2_val.key()) {
+                                    if ref3_val.value().contains(ref2_val.key()) {
                                         return_vec
                                             .push((ref3_val.key().clone(), ref2_val.key().clone()));
                                         break;
                                     }
                                 }
+                                return_vec.push((ref2_val.key().clone(), ref1_val.key().clone()));
+                                break;
                             }
-                            return_vec.push((ref2_val.key().clone(), ref1_val.key().clone()));
-                            break;
                         }
                         return_vec.push((ref1_val.key().clone(), from.clone()));
                         break;
@@ -149,7 +155,7 @@ impl Cache {
 
     // Exchanges Shared -> Persistent or vice-versa
     pub fn get_associated_id(&self, input: DieselUlid) -> Option<DieselUlid> {
-        self.shared_id_cache.get(&input).map(|e| e.clone())
+        self.shared_id_cache.get(&input).map(|e| *e)
     }
 
     pub fn add_shared(&self, shared: DieselUlid, persistent: DieselUlid) {

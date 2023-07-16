@@ -233,6 +233,10 @@ impl Cache {
     pub fn remove_pubkey(&self, pk: PubKey) {
         self.pubkeys.remove(&pk);
     }
+
+    pub fn get_pubkeys(&self) -> Vec<PubKey>{
+        self.pubkeys.clone().into_iter().collect()
+    }
 }
 
 #[cfg(test)]
@@ -605,6 +609,20 @@ mod tests {
 
         // Check if the pubkey is removed from the cache
         assert!(!cache.pubkeys.contains(&pubkey_a));
+    }
+
+    #[test]
+    fn test_get_pubkeys() {
+        let cache = Cache::new();
+        let pubkey = PubKey::DataProxy("pubkey".to_owned());
+
+        // Test adding a pubkey
+        cache.add_pubkey(pubkey.clone());
+
+        // Check if the pubkey is present in the cache
+        assert!(cache.pubkeys.contains(&pubkey));
+
+        assert_eq!(cache.get_pubkeys().len(), 1);
     }
 
     #[test]

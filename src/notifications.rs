@@ -398,8 +398,10 @@ mod tests {
     use super::Cache;
     use super::NotificationCache;
     use super::*;
+    use aruna_rust_api::api::notification::services::v2::NewPubkey;
     use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
     use aruna_rust_api::api::notification::services::v2::resource_event_context::Event;
+    use aruna_rust_api::api::notification::services::v2::DataproxyInfo;
     use aruna_rust_api::api::notification::services::v2::EventMessage;
     use aruna_rust_api::api::notification::services::v2::RelationUpdate;
     use aruna_rust_api::api::notification::services::v2::Reply;
@@ -687,7 +689,6 @@ mod tests {
             cache: Cache::new(),
         };
 
-
         let token_id = DieselUlid::generate();
         let user_id = DieselUlid::generate();
         let event_message = EventMessage {
@@ -700,7 +701,9 @@ mod tests {
                         id: token_id.to_string(),
                         permission: Some(Permission {
                             permission_level: PermissionLevel::Admin as i32,
-                            resource_id: Some(ResourceId::CollectionId(DieselUlid::generate().to_string())),
+                            resource_id: Some(ResourceId::CollectionId(
+                                DieselUlid::generate().to_string(),
+                            )),
                         }),
                     })),
                 }),
@@ -723,51 +726,181 @@ mod tests {
             })
         );
 
-        assert!(notification_cache.cache.get_permissions(&token_id).is_some());
+        assert!(notification_cache
+            .cache
+            .get_permissions(&token_id)
+            .is_some());
     }
 
-    // #[tokio::test]
-    // async fn test_process_message_user_event_token() {
-    //     let cache = Cache::new();
-    //     let notification_cache = NotificationCache {
-    //         notification_service: None,
-    //         cache: cache.clone(),
-    //     };
+    #[tokio::test]
+    async fn test_process_message_user_event_token_update() {
+        let notification_cache = NotificationCache {
+            notification_service: None,
+            cache: Cache::new(),
+        };
 
-    //     let user_id = "user_id".to_owned();
-    //     let token_id = "token_id".to_owned();
-    //     let resource_id = "resource_id".to_owned();
-    //     let event_message = EventMessage {
-    //         message_variant: Some(MessageVariant::UserEvent(UserEvent {
-    //             user_id: user_id.clone(),
-    //             event_type: Some(UserEventType::Created),
-    //             context: Some(UserEventContext {
-    //                 event: Some(user_event_context::Event::Token(Token {
-    //                     id: token_id.clone(),
-    //                     permission: Some(Permission {
-    //                         resource_id: Some(resource_id.clone()),
-    //                     }),
-    //                 })),
-    //             }),
-    //             reply: Some(Reply::AcknowledgeMessageBatch(
-    //                 AcknowledgeMessageBatchReply {
-    //                     replies: Vec::new(),
-    //                 },
-    //             )),
-    //         })),
-    //     };
+        let token_id = DieselUlid::generate();
+        let user_id = DieselUlid::generate();
+        let event_message = EventMessage {
+            message_variant: Some(MessageVariant::UserEvent(UserEvent {
+                user_id: user_id.to_string(),
+                user_name: "a_name".to_string(),
+                event_type: UserEventType::Updated as i32,
+                context: Some(UserEventContext {
+                    event: Some(user_event_context::Event::Token(Token {
+                        id: token_id.to_string(),
+                        permission: Some(Permission {
+                            permission_level: PermissionLevel::Admin as i32,
+                            resource_id: Some(ResourceId::CollectionId(
+                                DieselUlid::generate().to_string(),
+                            )),
+                        }),
+                    })),
+                }),
+                reply: Some(Reply {
+                    reply: "a".to_string(),
+                    salt: "b".to_string(),
+                    hmac: "c".to_string(),
+                }),
+            })),
+        };
 
-    //     let result = notification_cache.process_message(event_message).await;
+        let result = notification_cache.process_message(event_message).await;
 
-    //     assert_eq!(result, None);
-    //     assert_eq!(cache.permissions.len(), 1);
+        assert_eq!(
+            result,
+            Some(Reply {
+                reply: "a".to_string(),
+                salt: "b".to_string(),
+                hmac: "c".to_string()
+            })
+        );
 
-    //     let user_ulid = DieselUlid::from_str(&token_id).unwrap();
-    //     let permissions = cache.get_permissions(&user_ulid).unwrap();
-    //     let expected_permission = (
-    //         Resource::try_from(resource_id).unwrap().into(),
-    //         PermissionLevel::Admin,
-    //     );
-    //     assert_eq!(permissions, vec![expected_permission]);
-    // }
+        assert!(notification_cache
+            .cache
+            .get_permissions(&token_id)
+            .is_some());
+    }
+
+    #[tokio::test]
+    async fn test_process_message_user_event_token_deleted() {
+        let notification_cache = NotificationCache {
+            notification_service: None,
+            cache: Cache::new(),
+        };
+
+        let user_id = DieselUlid::generate();
+        let event_message = EventMessage {
+            message_variant: Some(MessageVariant::UserEvent(UserEvent {
+                user_id: user_id.to_string(),
+                user_name: "a_name".to_string(),
+                event_type: UserEventType::Deleted as i32,
+                context: None,
+                reply: Some(Reply {
+                    reply: "a".to_string(),
+                    salt: "b".to_string(),
+                    hmac: "c".to_string(),
+                }),
+            })),
+        };
+
+        let result = notification_cache.process_message(event_message).await;
+
+        assert_eq!(
+            result,
+            Some(Reply {
+                reply: "a".to_string(),
+                salt: "b".to_string(),
+                hmac: "c".to_string()
+            })
+        );
+
+        assert!(notification_cache.cache.get_permissions(&user_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_anouncement_events() {
+        let notification_cache = NotificationCache {
+            notification_service: None,
+            cache: Cache::new(),
+        };
+
+        let _user_id = DieselUlid::generate();
+        let event_message = EventMessage {
+            message_variant: Some(MessageVariant::AnnouncementEvent(AnouncementEvent {
+                event_variant: Some(EventVariant::NewDataProxy(DataproxyInfo {
+                    endpoint_id: DieselUlid::generate().to_string(),
+                    name: "a_name".to_string(),
+                    pubkey: "A pubkey".to_string(),
+                    ..Default::default()
+                })),
+                reply: Some(Reply {
+                    reply: "a".to_string(),
+                    salt: "b".to_string(),
+                    hmac: "c".to_string(),
+                }),
+            })),
+        };
+
+        let result = notification_cache.process_message(event_message).await;
+
+        assert_eq!(
+            result,
+            Some(Reply {
+                reply: "a".to_string(),
+                salt: "b".to_string(),
+                hmac: "c".to_string()
+            })
+        );
+
+        assert_eq!(notification_cache.cache.get_pubkeys().len(), 1);
+
+
+
+        let event_message = EventMessage {
+            message_variant: Some(MessageVariant::AnnouncementEvent(AnouncementEvent {
+                event_variant: Some(EventVariant::Pubkey(NewPubkey{ pubkey: "pubkey_2".to_string() })),
+                reply: Some(Reply {
+                    reply: "a".to_string(),
+                    salt: "b".to_string(),
+                    hmac: "c".to_string(),
+                }),
+            })),
+        };
+
+        let result = notification_cache.process_message(event_message).await;
+
+        assert_eq!(
+            result,
+            Some(Reply {
+                reply: "a".to_string(),
+                salt: "b".to_string(),
+                hmac: "c".to_string()
+            })
+        );
+
+        assert_eq!(notification_cache.cache.get_pubkeys().len(), 2);
+
+
+        let event_message = EventMessage {
+            message_variant: Some(MessageVariant::AnnouncementEvent(AnouncementEvent {
+                event_variant: Some(EventVariant::RemoveDataProxy(DataproxyInfo {
+                    endpoint_id: DieselUlid::generate().to_string(),
+                    name: "a_name".to_string(),
+                    pubkey: "A pubkey".to_string(),
+                    ..Default::default()
+                })),
+                reply: Some(Reply {
+                    reply: "a".to_string(),
+                    salt: "b".to_string(),
+                    hmac: "c".to_string(),
+                }),
+            })),
+        };
+
+        let _result = notification_cache.process_message(event_message).await;
+
+        assert_eq!(notification_cache.cache.get_pubkeys().len(), 1);
+
+    }
 }

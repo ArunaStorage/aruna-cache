@@ -260,7 +260,9 @@ mod tests {
     fn test_traverse_fail() {
         let cache = Cache::new();
 
-        assert!(cache.traverse_graph(&Resource::Collection(DieselUlid::generate())).is_err());
+        assert!(cache
+            .traverse_graph(&Resource::Collection(DieselUlid::generate()))
+            .is_err());
     }
 
     #[test]
@@ -381,9 +383,7 @@ mod tests {
 
         // Test the get_parents function
         let result = cache.get_parents(&resource_b).unwrap();
-        let expected = vec![
-            (resource_a.clone(), resource_b.clone()),
-        ];
+        let expected = vec![(resource_a.clone(), resource_b.clone())];
         assert_eq!(result, expected);
     }
 
@@ -553,7 +553,6 @@ mod tests {
         cache.add_or_update_permission(resource_id.clone(), permission.clone());
         cache.remove_permission(resource_id.clone(), Some(permission.0), false);
         assert!(cache.permissions.get(&resource_id).unwrap().is_empty());
-
     }
 
     #[test]

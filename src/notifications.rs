@@ -407,12 +407,15 @@ mod tests {
     use aruna_rust_api::api::notification::services::v2::ResourceEvent;
     use aruna_rust_api::api::notification::services::v2::ResourceEventContext;
     use aruna_rust_api::api::notification::services::v2::ResourceEventType;
+    use aruna_rust_api::api::notification::services::v2::Token;
     use aruna_rust_api::api::notification::services::v2::UserEventContext;
     use aruna_rust_api::api::storage::models::v2::internal_relation;
     use aruna_rust_api::api::storage::models::v2::internal_relation::Variant;
+    use aruna_rust_api::api::storage::models::v2::permission::ResourceId;
     use aruna_rust_api::api::storage::models::v2::relation;
     use aruna_rust_api::api::storage::models::v2::InternalRelation;
     use aruna_rust_api::api::storage::models::v2::InternalRelationVariant;
+    use aruna_rust_api::api::storage::models::v2::Permission;
     use aruna_rust_api::api::storage::models::v2::Relation;
     use aruna_rust_api::api::storage::models::v2::RelationDirection;
     use aruna_rust_api::api::storage::models::v2::ResourceVariant;
@@ -675,6 +678,52 @@ mod tests {
             permissions,
             vec![(ResourcePermission::GlobalAdmin, PermissionLevel::Admin)]
         );
+    }
+
+    #[tokio::test]
+    async fn test_process_message_user_event_token() {
+        let notification_cache = NotificationCache {
+            notification_service: None,
+            cache: Cache::new(),
+        };
+
+
+        let token_id = DieselUlid::generate();
+        let user_id = DieselUlid::generate();
+        let event_message = EventMessage {
+            message_variant: Some(MessageVariant::UserEvent(UserEvent {
+                user_id: user_id.to_string(),
+                user_name: "a_name".to_string(),
+                event_type: UserEventType::Created as i32,
+                context: Some(UserEventContext {
+                    event: Some(user_event_context::Event::Token(Token {
+                        id: token_id.to_string(),
+                        permission: Some(Permission {
+                            permission_level: PermissionLevel::Admin as i32,
+                            resource_id: Some(ResourceId::CollectionId(DieselUlid::generate().to_string())),
+                        }),
+                    })),
+                }),
+                reply: Some(Reply {
+                    reply: "a".to_string(),
+                    salt: "b".to_string(),
+                    hmac: "c".to_string(),
+                }),
+            })),
+        };
+
+        let result = notification_cache.process_message(event_message).await;
+
+        assert_eq!(
+            result,
+            Some(Reply {
+                reply: "a".to_string(),
+                salt: "b".to_string(),
+                hmac: "c".to_string()
+            })
+        );
+
+        assert!(notification_cache.cache.get_permissions(&token_id).is_some());
     }
 
     // #[tokio::test]

@@ -70,8 +70,8 @@ impl Cache {
             Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),
             Resource::Collection(_) => {
                 for ref_val in self.graph_cache.iter() {
-                    if ref_val.value().contains(from) && targets.contains(ref_val.key()){
-                        return Ok(())
+                    if ref_val.value().contains(from) && targets.contains(ref_val.key()) {
+                        return Ok(());
                     }
                 }
             }
@@ -79,11 +79,13 @@ impl Cache {
                 for ref1_val in self.graph_cache.iter() {
                     if ref1_val.value().contains(from) {
                         if targets.contains(ref1_val.key()) {
-                            return Ok(())
+                            return Ok(());
                         }
                         for ref2_val in self.graph_cache.iter() {
-                            if ref2_val.value().contains(ref1_val.key()) && targets.contains(ref2_val.key()){
-                                return Ok(())
+                            if ref2_val.value().contains(ref1_val.key())
+                                && targets.contains(ref2_val.key())
+                            {
+                                return Ok(());
                             }
                         }
                     }
@@ -93,16 +95,18 @@ impl Cache {
                 for ref1_val in self.graph_cache.iter() {
                     if ref1_val.value().contains(from) {
                         if targets.contains(ref1_val.key()) {
-                            return Ok(())
+                            return Ok(());
                         }
                         for ref2_val in self.graph_cache.iter() {
                             if ref2_val.value().contains(ref1_val.key()) {
                                 if targets.contains(ref2_val.key()) {
-                                    return Ok(())
+                                    return Ok(());
                                 }
                                 for ref3_val in self.graph_cache.iter() {
-                                    if ref3_val.value().contains(ref2_val.key()) && targets.contains(ref2_val.key()){
-                                        return Ok(())
+                                    if ref3_val.value().contains(ref2_val.key())
+                                        && targets.contains(ref3_val.key())
+                                    {
+                                        return Ok(());
                                     }
                                 }
                             }
@@ -284,7 +288,7 @@ impl Cache {
         self.pubkeys.remove(&pk);
     }
 
-    pub fn get_pubkeys(&self) -> Vec<PubKey>{
+    pub fn get_pubkeys(&self) -> Vec<PubKey> {
         self.pubkeys.clone().into_iter().collect()
     }
 }
@@ -690,5 +694,53 @@ mod tests {
         // Check if the new persistent id is associated with the shared id
         let result = cache.get_associated_id(&shared_id);
         assert_eq!(result, Some(new_persistent_id));
+    }
+
+    #[test]
+    fn test_get_parents_with_target() {
+        let cache = Cache::new();
+
+        let project_a = Resource::Project(DieselUlid::generate());
+        let project_b = Resource::Project(DieselUlid::generate());
+
+        let collection_a = Resource::Collection(DieselUlid::generate());
+        let collection_b = Resource::Collection(DieselUlid::generate());
+        let collection_c = Resource::Collection(DieselUlid::generate());
+        let collection_d = Resource::Collection(DieselUlid::generate());
+
+        let dataset_a = Resource::Dataset(DieselUlid::generate());
+        let object_a = Resource::Object(DieselUlid::generate());
+
+        // Add entries to the graph cache
+        cache
+            .add_link(project_a.clone(), collection_a.clone())
+            .unwrap();
+        cache
+            .add_link(project_a.clone(), collection_b.clone())
+            .unwrap();
+        cache
+            .add_link(project_a.clone(), collection_c.clone())
+            .unwrap();
+        cache
+            .add_link(project_a.clone(), collection_d.clone())
+            .unwrap();
+        cache
+            .add_link(collection_a.clone(), dataset_a.clone())
+            .unwrap();
+        cache
+            .add_link(collection_b.clone(), dataset_a.clone())
+            .unwrap();
+        cache
+            .add_link(collection_c.clone(), dataset_a.clone())
+            .unwrap();
+        cache
+            .add_link(collection_d.clone(), dataset_a.clone())
+            .unwrap();
+        cache.add_link(dataset_a.clone(), object_a.clone()).unwrap();
+
+        assert!(cache.get_parents_with_targets(&object_a, vec![project_a.clone()]).is_ok());
+        assert!(cache.get_parents_with_targets(&object_a, vec![collection_d.clone()]).is_ok());
+        assert!(cache.get_parents_with_targets(&object_a, vec![dataset_a.clone()]).is_ok());
+        assert!(cache.get_parents_with_targets(&object_a, vec![project_b.clone()]).is_err());
     }
 }

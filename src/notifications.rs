@@ -398,11 +398,11 @@ mod tests {
     use super::Cache;
     use super::NotificationCache;
     use super::*;
-    use aruna_rust_api::api::notification::services::v2::NewPubkey;
     use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
     use aruna_rust_api::api::notification::services::v2::resource_event_context::Event;
     use aruna_rust_api::api::notification::services::v2::DataproxyInfo;
     use aruna_rust_api::api::notification::services::v2::EventMessage;
+    use aruna_rust_api::api::notification::services::v2::NewPubkey;
     use aruna_rust_api::api::notification::services::v2::RelationUpdate;
     use aruna_rust_api::api::notification::services::v2::Reply;
     use aruna_rust_api::api::notification::services::v2::Resource as APIResource;
@@ -855,11 +855,11 @@ mod tests {
 
         assert_eq!(notification_cache.cache.get_pubkeys().len(), 1);
 
-
-
         let event_message = EventMessage {
             message_variant: Some(MessageVariant::AnnouncementEvent(AnouncementEvent {
-                event_variant: Some(EventVariant::Pubkey(NewPubkey{ pubkey: "pubkey_2".to_string() })),
+                event_variant: Some(EventVariant::Pubkey(NewPubkey {
+                    pubkey: "pubkey_2".to_string(),
+                })),
                 reply: Some(Reply {
                     reply: "a".to_string(),
                     salt: "b".to_string(),
@@ -881,7 +881,6 @@ mod tests {
 
         assert_eq!(notification_cache.cache.get_pubkeys().len(), 2);
 
-
         let event_message = EventMessage {
             message_variant: Some(MessageVariant::AnnouncementEvent(AnouncementEvent {
                 event_variant: Some(EventVariant::RemoveDataProxy(DataproxyInfo {
@@ -901,6 +900,5 @@ mod tests {
         let _result = notification_cache.process_message(event_message).await;
 
         assert_eq!(notification_cache.cache.get_pubkeys().len(), 1);
-
     }
 }

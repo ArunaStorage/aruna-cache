@@ -2,7 +2,6 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use anyhow::Result;
-use aruna_rust_api::api::notification::services::v2::AnouncementEvent;
 use aruna_rust_api::api::notification::services::v2::anouncement_event::EventVariant;
 use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
 use aruna_rust_api::api::notification::services::v2::event_notification_service_client::{
@@ -11,6 +10,7 @@ use aruna_rust_api::api::notification::services::v2::event_notification_service_
 use aruna_rust_api::api::notification::services::v2::resource_event_context::Event;
 use aruna_rust_api::api::notification::services::v2::user_event_context;
 use aruna_rust_api::api::notification::services::v2::AcknowledgeMessageBatchRequest;
+use aruna_rust_api::api::notification::services::v2::AnouncementEvent;
 use aruna_rust_api::api::notification::services::v2::EventMessage;
 use aruna_rust_api::api::notification::services::v2::GetEventMessageBatchStreamRequest;
 use aruna_rust_api::api::notification::services::v2::RelationUpdate;
@@ -130,19 +130,24 @@ impl NotificationCache {
         match message.message_variant.unwrap() {
             MessageVariant::ResourceEvent(r_event) => self.process_resource_event(r_event).await,
             MessageVariant::UserEvent(u_event) => self.process_user_event(u_event).await,
-            MessageVariant::AnnouncementEvent(a_event) => self.process_announcements_event(a_event).await,
+            MessageVariant::AnnouncementEvent(a_event) => {
+                self.process_announcements_event(a_event).await
+            }
         }
     }
 
-
     async fn process_announcements_event(&self, message: AnouncementEvent) -> Option<Reply> {
-
         match message.event_variant? {
             EventVariant::NewDataProxy(newdp_event) => {
-                self.cache.add_pubkey(crate::structs::PubKey::DataProxy(newdp_event.pubkey));
-            },
-            EventVariant::RemoveDataProxy(rem_dp_event) => self.cache.remove_pubkey(crate::structs::PubKey::DataProxy(rem_dp_event.pubkey)),
-            EventVariant::Pubkey(pk_event) => self.cache.add_pubkey(crate::structs::PubKey::Server(pk_event.pubkey)),
+                self.cache
+                    .add_pubkey(crate::structs::PubKey::DataProxy(newdp_event.pubkey));
+            }
+            EventVariant::RemoveDataProxy(rem_dp_event) => self
+                .cache
+                .remove_pubkey(crate::structs::PubKey::DataProxy(rem_dp_event.pubkey)),
+            EventVariant::Pubkey(pk_event) => self
+                .cache
+                .add_pubkey(crate::structs::PubKey::Server(pk_event.pubkey)),
             _ => (),
         }
         message.reply

@@ -241,6 +241,29 @@ mod tests {
     use crate::structs::Resource::*;
 
     #[test]
+    fn test_new() {
+        let cache = Cache::new();
+
+        let cache2 = Cache {
+            graph_cache: DashMap::with_hasher(RandomState::new()),
+            name_cache: DashMap::with_hasher(RandomState::new()),
+            shared_id_cache: DashMap::with_hasher(RandomState::new()),
+            object_cache: None,
+            permissions: DashMap::with_hasher(RandomState::new()),
+            pubkeys: DashSet::with_hasher(RandomState::new()),
+        };
+
+        assert_eq!(format!("{:#?}", cache), format!("{:#?}", cache2))
+    }
+
+    #[test]
+    fn test_traverse_fail() {
+        let cache = Cache::new();
+
+        assert!(cache.traverse_graph(&Resource::Collection(DieselUlid::generate())).is_err());
+    }
+
+    #[test]
     fn test_shared() {
         let cache = Cache::new();
 
@@ -347,6 +370,21 @@ mod tests {
             (resource_c.clone(), resource_d.clone()),
         ];
         assert_eq!(result, expected);
+
+        // Test the get_parents function
+        let result = cache.get_parents(&resource_c).unwrap();
+        let expected = vec![
+            (resource_a.clone(), resource_b.clone()),
+            (resource_b.clone(), resource_c.clone()),
+        ];
+        assert_eq!(result, expected);
+
+        // Test the get_parents function
+        let result = cache.get_parents(&resource_b).unwrap();
+        let expected = vec![
+            (resource_a.clone(), resource_b.clone()),
+        ];
+        assert_eq!(result, expected);
     }
 
     #[test]
@@ -392,7 +430,7 @@ mod tests {
         assert_eq!(result, expected);
 
         // Test removing all names associated with a resource
-        cache.remove_name(resource_b.clone(), Some(name.clone()));
+        cache.remove_name(resource_b.clone(), None);
 
         // Check if all names associated with the resource are removed
         assert!(cache.name_cache.get(&name).unwrap().is_empty());
@@ -507,6 +545,15 @@ mod tests {
 
         // Check if the permission is removed for the specific resource
         assert!(!cache.permissions.contains_key(&resource_id));
+
+        let permission = (
+            ResourcePermission::Resource(Resource::Project(DieselUlid::generate())),
+            PermissionLevel::Read,
+        );
+        cache.add_or_update_permission(resource_id.clone(), permission.clone());
+        cache.remove_permission(resource_id.clone(), Some(permission.0), false);
+        assert!(cache.permissions.get(&resource_id).unwrap().is_empty());
+
     }
 
     #[test]

@@ -146,18 +146,39 @@ impl NotificationCache {
                             }
                             user_event_context::Event::Token(t) => {
                                 if let Some(p) = t.permission {
-                                    if let Some(r) = p.resource_id {
-                                        self.cache.add_or_update_permission(
-                                            DieselUlid::from_str(&t.id).ok()?,
-                                            (
-                                                Resource::try_from(r).ok()?.into(),
-                                                PermissionLevel::Admin,
-                                            ),
-                                        )
+                                    if let Some(r) = p.resource_id.clone() {
+                                        if p.permission_level() != PermissionLevel::Unspecified {
+                                            self.cache.add_or_update_permission(
+                                                DieselUlid::from_str(&t.id).ok()?,
+                                                (
+                                                    Resource::try_from(r).ok()?.into(),
+                                                    p.permission_level(),
+                                                ),
+                                            )
+                                        } else {
+                                            let user_perm = self.cache.get_permissions(
+                                                &DieselUlid::from_str(&message.user_id).ok()?,
+                                            )?;
+
+                                            for perm in user_perm {
+                                                self.cache.add_or_update_permission(
+                                                    DieselUlid::from_str(&t.id).ok()?,
+                                                    perm,
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
-                            user_event_context::Event::Permission(_) => todo!(),
+                            user_event_context::Event::Permission(perm) => {
+                                self.cache.add_or_update_permission(
+                                    DieselUlid::from_str(&message.user_id).ok()?,
+                                    (
+                                        Resource::try_from(perm.resource_id.clone()?).ok()?.into(),
+                                        perm.permission_level(),
+                                    ),
+                                );
+                            },
                             _ => (),
                         }
                     }
@@ -583,11 +604,21 @@ mod tests {
 
         let result = notification_cache.process_message(event_message).await;
 
-        assert_eq!(result, Some(Reply { reply: "a".to_string(), salt: "b".to_string(), hmac: "c".to_string() }));
+        assert_eq!(
+            result,
+            Some(Reply {
+                reply: "a".to_string(),
+                salt: "b".to_string(),
+                hmac: "c".to_string()
+            })
+        );
         assert_eq!(notification_cache.cache.permissions.len(), 1);
 
         let user_ulid = DieselUlid::from_str(&user_id.to_string()).unwrap();
-        let permissions = notification_cache.cache.get_permissions(&user_ulid).unwrap();
+        let permissions = notification_cache
+            .cache
+            .get_permissions(&user_ulid)
+            .unwrap();
         assert_eq!(
             permissions,
             vec![(ResourcePermission::GlobalAdmin, PermissionLevel::Admin)]

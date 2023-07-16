@@ -19,6 +19,7 @@ pub struct Cache {
     pub permissions:
         DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
     pub pubkeys: DashSet<PubKey, RandomState>,
+    pub oidc_ids: DashMap<String, DieselUlid, RandomState>,
 }
 
 impl Default for Cache {
@@ -36,6 +37,7 @@ impl Cache {
             object_cache: None,
             permissions: DashMap::with_hasher(RandomState::new()),
             pubkeys: DashSet::with_hasher(RandomState::new()),
+            oidc_ids: DashMap::with_hasher(RandomState::new()),
         }
     }
 
@@ -291,6 +293,17 @@ impl Cache {
     pub fn get_pubkeys(&self) -> Vec<PubKey> {
         self.pubkeys.clone().into_iter().collect()
     }
+
+    pub fn add_oidc(&self, oidc_id: String, user_id: DieselUlid) {
+        self.oidc_ids.insert(oidc_id, user_id);
+    }
+    pub fn remove_oidc(&self, oidc_id: &str) {
+        self.oidc_ids.remove(oidc_id);
+    }
+    pub fn get_user_perm_by_oidc(&self, oidc_id: &str) -> Option<Vec<(ResourcePermission, PermissionLevel)>>{
+        let ulid = self.oidc_ids.get(oidc_id)?;
+        self.get_permissions(&ulid)
+    }
 }
 
 #[cfg(test)]
@@ -309,6 +322,7 @@ mod tests {
             object_cache: None,
             permissions: DashMap::with_hasher(RandomState::new()),
             pubkeys: DashSet::with_hasher(RandomState::new()),
+            ..Default::default()
         };
 
         assert_eq!(format!("{:#?}", cache), format!("{:#?}", cache2))

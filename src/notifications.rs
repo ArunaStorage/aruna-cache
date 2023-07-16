@@ -32,6 +32,7 @@ use tonic::transport::{Channel, ClientTlsConfig};
 use tonic::Request;
 
 use crate::cache::Cache;
+use crate::structs::PubKey;
 use crate::structs::Resource;
 use crate::structs::ResourcePermission;
 use crate::utils::GetRef;
@@ -390,6 +391,18 @@ impl NotificationCache {
             }
         }
         Some(())
+    }
+
+    pub fn get_user_perm_by_oidc(&self, oidc: &str) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
+        self.cache.get_user_perm_by_oidc(oidc)
+    }
+
+    pub fn test_get_parents_with_target(&self, from: Resource, targets: Vec<Resource>) -> Result<()> {
+        self.cache.get_parents_with_targets(&from, targets)
+    }
+
+    pub fn get_pubkeys(&self) -> Vec<PubKey> {
+        self.cache.get_pubkeys()
     }
 }
 

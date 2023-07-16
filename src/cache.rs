@@ -127,6 +127,13 @@ impl Cache {
         Ok(return_vec)
     }
 
+    pub fn remove_all_res(&self, res: Resource) {
+        self.graph_cache.remove(&res);
+        for x in self.graph_cache.iter_mut() {
+            x.value().remove(&res);
+        }
+    }
+
     pub fn add_name(&self, res: Resource, name: String) {
         self.name_cache.entry(name).or_default().insert(res);
     }

@@ -2,6 +2,8 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use anyhow::Result;
+use aruna_rust_api::api::notification::services::v2::AnouncementEvent;
+use aruna_rust_api::api::notification::services::v2::anouncement_event::EventVariant;
 use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
 use aruna_rust_api::api::notification::services::v2::event_notification_service_client::{
     self, EventNotificationServiceClient,
@@ -128,13 +130,27 @@ impl NotificationCache {
         match message.message_variant.unwrap() {
             MessageVariant::ResourceEvent(r_event) => self.process_resource_event(r_event).await,
             MessageVariant::UserEvent(u_event) => self.process_user_event(u_event).await,
-            MessageVariant::AnnouncementEvent(a_event) => a_event.reply,
+            MessageVariant::AnnouncementEvent(a_event) => self.process_announcements_event(a_event).await,
         }
+    }
+
+
+    async fn process_announcements_event(&self, message: AnouncementEvent) -> Option<Reply> {
+
+        match message.event_variant? {
+            EventVariant::NewDataProxy(newdp_event) => {
+                self.cache.add_pubkey(crate::structs::PubKey::DataProxy(newdp_event.pubkey));
+            },
+            EventVariant::RemoveDataProxy(rem_dp_event) => self.cache.remove_pubkey(crate::structs::PubKey::DataProxy(rem_dp_event.pubkey)),
+            EventVariant::Pubkey(pk_event) => self.cache.add_pubkey(crate::structs::PubKey::Server(pk_event.pubkey)),
+            _ => (),
+        }
+        message.reply
     }
 
     async fn process_user_event(&self, message: UserEvent) -> Option<Reply> {
         match message.event_type() {
-            UserEventType::Created => {
+            UserEventType::Created | UserEventType::Updated => {
                 if let Some(ctx) = message.context {
                     if let Some(e) = ctx.event {
                         match e {
@@ -178,17 +194,42 @@ impl NotificationCache {
                                         perm.permission_level(),
                                     ),
                                 );
-                            },
+                            }
                             _ => (),
                         }
                     }
                 }
             }
-            UserEventType::Updated => todo!(),
-            UserEventType::Deleted => todo!(),
+            UserEventType::Deleted => {
+                if let Some(ctx) = message.context {
+                    if let Some(e) = ctx.event {
+                        match e {
+                            user_event_context::Event::Admin(_) => self.cache.remove_permission(
+                                DieselUlid::from_str(&message.user_id).ok()?,
+                                Some(ResourcePermission::GlobalAdmin),
+                                false,
+                            ),
+                            user_event_context::Event::Token(t) => self.cache.remove_permission(
+                                DieselUlid::from_str(&t.id).ok()?,
+                                None,
+                                true,
+                            ),
+                            user_event_context::Event::Permission(perm) => {
+                                self.cache.remove_permission(
+                                    DieselUlid::from_str(&message.user_id).ok()?,
+                                    Some(
+                                        Resource::try_from(perm.resource_id.clone()?).ok()?.into(),
+                                    ),
+                                    false,
+                                );
+                            }
+                            _ => (),
+                        }
+                    }
+                }
+            }
             _ => (),
         }
-
         message.reply
     }
 
@@ -225,7 +266,13 @@ impl NotificationCache {
                     }
                 }
             }
-            ResourceEventType::Deleted => {}
+            ResourceEventType::Deleted => {
+                if let Some(r) = event.resource {
+                    let (_associated_id, res) = r.get_ref()?;
+                    self.cache.remove_name(res.clone(), None);
+                    self.cache.remove_all_res(res)
+                }
+            }
             _ => (),
         }
 

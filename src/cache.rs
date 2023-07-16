@@ -61,6 +61,7 @@ impl Cache {
             }
             return_vec.push((from.clone(), l1_cloned))
         }
+        return_vec.reverse();
         Ok(return_vec)
     }
 
@@ -229,10 +230,8 @@ impl Cache {
 
 #[cfg(test)]
 mod tests {
-    use diesel_ulid::DieselUlid;
-
-    use super::Cache;
-    use super::Resource::*;
+    use super::*;
+    use crate::structs::Resource::*;
 
     #[test]
     fn test_shared() {
@@ -283,5 +282,292 @@ mod tests {
         cache
             .add_link(project_1.clone(), collection_1.clone())
             .unwrap();
+    }
+
+    #[test]
+    fn test_traverse_graph() {
+        let cache = Cache::new();
+        let resource_a = Resource::Project(DieselUlid::generate());
+        let resource_b = Resource::Collection(DieselUlid::generate());
+        let resource_c = Resource::Dataset(DieselUlid::generate());
+        let resource_d = Resource::Object(DieselUlid::generate());
+
+        // Add entries to the graph cache
+        cache
+            .add_link(resource_a.clone(), resource_b.clone())
+            .unwrap();
+        cache
+            .add_link(resource_b.clone(), resource_c.clone())
+            .unwrap();
+        cache
+            .add_link(resource_c.clone(), resource_d.clone())
+            .unwrap();
+
+        // Test the traverse_graph function
+        let result = cache.traverse_graph(&resource_a).unwrap();
+        let expected = vec![
+            (resource_a.clone(), resource_b.clone()),
+            (resource_b.clone(), resource_c.clone()),
+            (resource_c.clone(), resource_d.clone()),
+        ];
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_get_parents() {
+        let cache = Cache::new();
+        let resource_a = Resource::Project(DieselUlid::generate());
+        let resource_b = Resource::Collection(DieselUlid::generate());
+        let resource_c = Resource::Dataset(DieselUlid::generate());
+        let resource_d = Resource::Object(DieselUlid::generate());
+
+        // Add entries to the graph cache
+        cache
+            .add_link(resource_a.clone(), resource_b.clone())
+            .unwrap();
+        cache
+            .add_link(resource_b.clone(), resource_c.clone())
+            .unwrap();
+        cache
+            .add_link(resource_c.clone(), resource_d.clone())
+            .unwrap();
+
+        // Test the get_parents function
+        let result = cache.get_parents(&resource_d).unwrap();
+        let expected = vec![
+            (resource_a.clone(), resource_b.clone()),
+            (resource_b.clone(), resource_c.clone()),
+            (resource_c.clone(), resource_d.clone()),
+        ];
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_add_name() {
+        let cache = Cache::new();
+        let resource_a = Resource::Project(DieselUlid::generate());
+        let name = "NameA".to_owned();
+
+        // Test adding a name
+        cache.add_name(resource_a.clone(), name.clone());
+
+        // Check if the name is present in the cache
+        let result = cache
+            .name_cache
+            .get(&name)
+            .map(|entry| entry.clone().into_iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let expected = vec![resource_a.clone()];
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_remove_name() {
+        let cache = Cache::new();
+        let resource_a = Resource::Project(DieselUlid::generate());
+        let resource_b = Resource::Project(DieselUlid::generate());
+        let name = "NameA".to_owned();
+
+        // Add names to the cache
+        cache.add_name(resource_a.clone(), name.clone());
+        cache.add_name(resource_b.clone(), name.clone());
+
+        // Test removing a specific name
+        cache.remove_name(resource_a.clone(), Some(name.clone()));
+
+        // Check if the name is removed for the specific resource
+        let result = cache
+            .name_cache
+            .get(&name)
+            .map(|entry| entry.clone().into_iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let expected = vec![resource_b.clone()];
+        assert_eq!(result, expected);
+
+        // Test removing all names associated with a resource
+        cache.remove_name(resource_b.clone(), Some(name.clone()));
+
+        // Check if all names associated with the resource are removed
+        assert!(cache.name_cache.get(&name).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_add_link() {
+        let cache = Cache::new();
+        let resource_a = Resource::Project(DieselUlid::generate());
+        let resource_b = Resource::Collection(DieselUlid::generate());
+
+        // Test adding a valid link
+        let result = cache.add_link(resource_a.clone(), resource_b.clone());
+        assert!(result.is_ok());
+
+        // Test adding an invalid link
+        let resource_c = Resource::Dataset(DieselUlid::generate());
+        let result = cache.add_link(resource_c.clone(), resource_a.clone());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_remove_link() {
+        let cache = Cache::new();
+        let resource_a = Resource::Project(DieselUlid::generate());
+        let resource_b = Resource::Collection(DieselUlid::generate());
+
+        // Add a link to the cache
+        cache
+            .add_link(resource_a.clone(), resource_b.clone())
+            .unwrap();
+
+        // Test removing the link
+        cache.remove_link(resource_a.clone(), resource_b.clone());
+
+        // Check if the link is removed
+        assert!(cache.graph_cache.get(&resource_a).unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_get_associated_id() {
+        let cache = Cache::new();
+        let shared_id = DieselUlid::generate();
+        let persistent_id = DieselUlid::generate();
+
+        // Add an entry to the shared id cache
+        cache.add_shared(shared_id.clone(), persistent_id.clone());
+
+        // Test getting the associated persistent id
+        let result = cache.get_associated_id(&shared_id);
+        assert_eq!(result, Some(persistent_id));
+
+        // Test getting the associated shared id
+        let result = cache.get_associated_id(&persistent_id);
+        assert_eq!(result, Some(shared_id));
+
+        // Test getting an associated id that doesn't exist
+        let invalid_id = DieselUlid::generate();
+        let result = cache.get_associated_id(&invalid_id);
+        assert_eq!(result, None);
+    }
+
+    #[test]
+    fn test_add_or_update_permission() {
+        let cache = Cache::new();
+        let resource_id = DieselUlid::generate();
+        let permission = (
+            ResourcePermission::Resource(Resource::Project(DieselUlid::generate())),
+            PermissionLevel::Read,
+        );
+
+        // Test adding a permission
+        cache.add_or_update_permission(resource_id.clone(), permission.clone());
+
+        // Check if the permission is added
+        let result = cache
+            .permissions
+            .get(&resource_id)
+            .map(|entry| entry.clone().into_iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let expected = vec![(permission.clone().0, permission.clone().1)];
+        assert_eq!(result, expected);
+
+        // Test updating a permission
+        let updated_permission = (ResourcePermission::GlobalAdmin, PermissionLevel::Write);
+        cache.add_or_update_permission(resource_id.clone(), updated_permission.clone());
+
+        // Check if the permission is updated
+        let result = cache
+            .permissions
+            .get(&resource_id)
+            .map(|entry| entry.clone().into_iter().collect::<Vec<_>>())
+            .unwrap_or_default();
+        let expected = vec![permission, (updated_permission.0, updated_permission.1)];
+        assert_eq!(result, expected);
+    }
+
+    #[test]
+    fn test_remove_permission() {
+        let cache = Cache::new();
+        let resource_id = DieselUlid::generate();
+        let permission = (
+            ResourcePermission::Resource(Resource::Project(DieselUlid::generate())),
+            PermissionLevel::Read,
+        );
+
+        // Add a permission to the cache
+        cache.add_or_update_permission(resource_id.clone(), permission.clone());
+
+        // Test removing a specific permission
+        cache.remove_permission(resource_id.clone(), Some(permission.0), true);
+
+        // Check if the permission is removed for the specific resource
+        assert!(!cache.permissions.contains_key(&resource_id));
+    }
+
+    #[test]
+    fn test_get_permissions() {
+        let cache = Cache::new();
+        let resource_id = DieselUlid::generate();
+        let permission_1 = (
+            ResourcePermission::Resource(Resource::Project(DieselUlid::generate())),
+            PermissionLevel::Read,
+        );
+        let permission_2 = (ResourcePermission::GlobalAdmin, PermissionLevel::Write);
+
+        // Add permissions to the cache
+        cache.add_or_update_permission(resource_id.clone(), permission_1.clone());
+        cache.add_or_update_permission(resource_id.clone(), permission_2.clone());
+
+        // Test getting permissions
+        let result = cache
+            .get_permissions(&resource_id)
+            .map(|perms| perms.into_iter().collect::<Vec<_>>())
+            .unwrap();
+        let expected = vec![permission_1.clone(), permission_2.clone()];
+        assert!(result.iter().all(|item| expected.contains(item)));
+    }
+
+    #[test]
+    fn test_add_pubkey() {
+        let cache = Cache::new();
+        let pubkey = PubKey::DataProxy("pubkey".to_owned());
+
+        // Test adding a pubkey
+        cache.add_pubkey(pubkey.clone());
+
+        // Check if the pubkey is present in the cache
+        assert!(cache.pubkeys.contains(&pubkey));
+    }
+
+    #[test]
+    fn test_remove_pubkey() {
+        let cache = Cache::new();
+        let pubkey_a = PubKey::DataProxy("pubkey_a".to_owned());
+        let pubkey_b = PubKey::DataProxy("pubkey_b".to_owned());
+
+        // Add pubkeys to the cache
+        cache.add_pubkey(pubkey_a.clone());
+        cache.add_pubkey(pubkey_b.clone());
+
+        // Test removing a pubkey
+        cache.remove_pubkey(pubkey_a.clone());
+
+        // Check if the pubkey is removed from the cache
+        assert!(!cache.pubkeys.contains(&pubkey_a));
+    }
+
+    #[test]
+    fn test_update_shared() {
+        let cache = Cache::new();
+        let shared_id = DieselUlid::generate();
+        let new_persistent_id = DieselUlid::generate();
+
+        // Test updating a shared id
+        cache.update_shared(shared_id.clone(), new_persistent_id.clone());
+
+        // Check if the shared id is updated
+        cache.shared_id_cache.get(&shared_id);
+
+        // Check if the new persistent id is associated with the shared id
+        let result = cache.get_associated_id(&shared_id);
+        assert_eq!(result, Some(new_persistent_id));
     }
 }

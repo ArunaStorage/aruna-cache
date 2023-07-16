@@ -322,28 +322,33 @@ impl NotificationCache {
 
 #[cfg(test)]
 mod tests {
+    use super::super::structs::Resource;
+    use super::Cache;
+    use super::NotificationCache;
+    use super::*;
     use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
     use aruna_rust_api::api::notification::services::v2::resource_event_context::Event;
     use aruna_rust_api::api::notification::services::v2::EventMessage;
     use aruna_rust_api::api::notification::services::v2::RelationUpdate;
     use aruna_rust_api::api::notification::services::v2::Reply;
-    use aruna_rust_api::api::notification::services::v2::Resource;
+    use aruna_rust_api::api::notification::services::v2::Resource as APIResource;
     use aruna_rust_api::api::notification::services::v2::ResourceEvent;
     use aruna_rust_api::api::notification::services::v2::ResourceEventContext;
     use aruna_rust_api::api::notification::services::v2::ResourceEventType;
+    use aruna_rust_api::api::notification::services::v2::UserEventContext;
+    use aruna_rust_api::api::storage::models::v2::internal_relation;
     use aruna_rust_api::api::storage::models::v2::internal_relation::Variant;
     use aruna_rust_api::api::storage::models::v2::relation;
     use aruna_rust_api::api::storage::models::v2::InternalRelation;
     use aruna_rust_api::api::storage::models::v2::InternalRelationVariant;
+    use aruna_rust_api::api::storage::models::v2::Project;
     use aruna_rust_api::api::storage::models::v2::Relation;
     use aruna_rust_api::api::storage::models::v2::RelationDirection;
     use aruna_rust_api::api::storage::models::v2::ResourceVariant;
     use diesel_ulid::DieselUlid;
+    use std::str::FromStr;
 
-    use super::Cache;
-    use super::NotificationCache;
-
-    fn mtemplate(res: Resource, irel: Vec<Relation>) -> EventMessage {
+    fn mtemplate(res: APIResource, irel: Vec<Relation>) -> EventMessage {
         EventMessage {
             message_variant: Some(MessageVariant::ResourceEvent(ResourceEvent {
                 resource: Some(res),
@@ -373,7 +378,7 @@ mod tests {
         let id = DieselUlid::generate();
         let aid = DieselUlid::generate();
 
-        let mut res = Resource {
+        let mut res = APIResource {
             resource_id: id.to_string(),
             resource_name: "a_resource".into(),
             associated_id: aid.to_string(),
@@ -440,4 +445,199 @@ mod tests {
                 .unwrap()
         );
     }
+
+    fn create_relation_update(
+        resource_id: &str,
+        resource_variant: ResourceVariant,
+    ) -> RelationUpdate {
+        let internal_relation = InternalRelation {
+            resource_id: resource_id.to_owned(),
+            resource_variant: resource_variant as i32,
+            direction: RelationDirection::Inbound as i32,
+            variant: Some(internal_relation::Variant::DefinedVariant(
+                InternalRelationVariant::BelongsTo as i32,
+            )),
+        };
+
+        RelationUpdate {
+            add_relations: vec![Relation {
+                relation: Some(relation::Relation::Internal(internal_relation)),
+            }],
+            remove_relations: vec![],
+        }
+    }
+
+    fn create_resource_event(
+        event_type: ResourceEventType,
+        resource: APIResource,
+        context: Option<ResourceEventContext>,
+        reply: Option<Reply>,
+    ) -> EventMessage {
+        EventMessage {
+            message_variant: Some(MessageVariant::ResourceEvent(ResourceEvent {
+                event_type: event_type as i32,
+                resource: Some(resource),
+                context,
+                reply,
+            })),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_process_message_resource_event_created() {
+        let cache = Cache::new();
+        let notification_cache = NotificationCache {
+            notification_service: None,
+            cache,
+        };
+
+        let id = DieselUlid::generate();
+        let associated_id = DieselUlid::generate();
+        let resource = APIResource {
+            resource_id: id.to_string(),
+            resource_name: "aproj".to_string(),
+            associated_id: DieselUlid::generate().to_string(),
+            resource_variant: ResourceVariant::Project as i32,
+        };
+        let relation_update =
+            create_relation_update(&associated_id.to_string(), ResourceVariant::Project);
+        let event_message =
+            create_resource_event(ResourceEventType::Created, resource.clone(), None, None);
+
+        let result = notification_cache.process_message(event_message).await;
+
+        assert_eq!(result, None);
+        assert_eq!(notification_cache.cache.shared_id_cache.len(), 2);
+        assert_eq!(notification_cache.cache.name_cache.len(), 1);
+        assert_eq!(notification_cache.cache.graph_cache.len(), 0); // No relations added in this case
+    }
+
+    #[tokio::test]
+    async fn test_process_message_resource_event_with_relation_updates() {
+        let cache = Cache::new();
+        let notification_cache = NotificationCache {
+            notification_service: None,
+            cache: cache,
+        };
+
+        let project_id = DieselUlid::generate();
+        let collection_id = DieselUlid::generate();
+        let resource = APIResource {
+            resource_id: collection_id.to_string(),
+            resource_name: "a_col".to_string(),
+            associated_id: DieselUlid::generate().to_string(),
+            resource_variant: ResourceVariant::Collection as i32,
+        };
+        let relation_update =
+            create_relation_update(&project_id.to_string(), ResourceVariant::Project);
+        let event_message = create_resource_event(
+            ResourceEventType::Created,
+            resource.clone(),
+            Some(ResourceEventContext {
+                event: Some(Event::RelationUpdates(relation_update)),
+            }),
+            None,
+        );
+
+        let result = notification_cache.process_message(event_message).await;
+
+        assert_eq!(result, None);
+        assert_eq!(notification_cache.cache.shared_id_cache.len(), 0);
+        assert_eq!(notification_cache.cache.name_cache.len(), 0);
+        assert_eq!(notification_cache.cache.graph_cache.len(), 0);
+
+        // let parents = notification_cache.cache
+        //     .get_parents(&Resource::Collection(collection_id))
+        //     .unwrap();
+        // assert_eq!(
+        //     parents,
+        //     vec![(
+        //         Resource::Project(project_id),
+        //         Resource::Collection(collection_id)
+        //     )]
+        // );
+    }
+
+    #[tokio::test]
+    async fn test_process_message_user_event_admin() {
+        let cache = Cache::new();
+        let notification_cache = NotificationCache {
+            notification_service: None,
+            cache: cache,
+        };
+
+        let user_id = DieselUlid::generate();
+        let event_message = EventMessage {
+            message_variant: Some(MessageVariant::UserEvent(UserEvent {
+                user_id: user_id.to_string(),
+                user_name: "a_name".to_string(),
+                event_type: UserEventType::Created as i32,
+                context: Some(UserEventContext {
+                    event: Some(user_event_context::Event::Admin(true)),
+                }),
+                reply: Some(Reply {
+                    reply: "a".to_string(),
+                    salt: "b".to_string(),
+                    hmac: "c".to_string(),
+                }),
+            })),
+        };
+
+        let result = notification_cache.process_message(event_message).await;
+
+        assert_eq!(result, Some(Reply { reply: "a".to_string(), salt: "b".to_string(), hmac: "c".to_string() }));
+        assert_eq!(notification_cache.cache.permissions.len(), 1);
+
+        let user_ulid = DieselUlid::from_str(&user_id.to_string()).unwrap();
+        let permissions = notification_cache.cache.get_permissions(&user_ulid).unwrap();
+        assert_eq!(
+            permissions,
+            vec![(ResourcePermission::GlobalAdmin, PermissionLevel::Admin)]
+        );
+    }
+
+    // #[tokio::test]
+    // async fn test_process_message_user_event_token() {
+    //     let cache = Cache::new();
+    //     let notification_cache = NotificationCache {
+    //         notification_service: None,
+    //         cache: cache.clone(),
+    //     };
+
+    //     let user_id = "user_id".to_owned();
+    //     let token_id = "token_id".to_owned();
+    //     let resource_id = "resource_id".to_owned();
+    //     let event_message = EventMessage {
+    //         message_variant: Some(MessageVariant::UserEvent(UserEvent {
+    //             user_id: user_id.clone(),
+    //             event_type: Some(UserEventType::Created),
+    //             context: Some(UserEventContext {
+    //                 event: Some(user_event_context::Event::Token(Token {
+    //                     id: token_id.clone(),
+    //                     permission: Some(Permission {
+    //                         resource_id: Some(resource_id.clone()),
+    //                     }),
+    //                 })),
+    //             }),
+    //             reply: Some(Reply::AcknowledgeMessageBatch(
+    //                 AcknowledgeMessageBatchReply {
+    //                     replies: Vec::new(),
+    //                 },
+    //             )),
+    //         })),
+    //     };
+
+    //     let result = notification_cache.process_message(event_message).await;
+
+    //     assert_eq!(result, None);
+    //     assert_eq!(cache.permissions.len(), 1);
+
+    //     let user_ulid = DieselUlid::from_str(&token_id).unwrap();
+    //     let permissions = cache.get_permissions(&user_ulid).unwrap();
+    //     let expected_permission = (
+    //         Resource::try_from(resource_id).unwrap().into(),
+    //         PermissionLevel::Admin,
+    //     );
+    //     assert_eq!(permissions, vec![expected_permission]);
+    // }
 }

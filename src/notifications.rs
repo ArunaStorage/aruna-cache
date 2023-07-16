@@ -322,7 +322,6 @@ impl NotificationCache {
 
 #[cfg(test)]
 mod tests {
-    use super::super::structs::Resource;
     use super::Cache;
     use super::NotificationCache;
     use super::*;
@@ -341,7 +340,6 @@ mod tests {
     use aruna_rust_api::api::storage::models::v2::relation;
     use aruna_rust_api::api::storage::models::v2::InternalRelation;
     use aruna_rust_api::api::storage::models::v2::InternalRelationVariant;
-    use aruna_rust_api::api::storage::models::v2::Project;
     use aruna_rust_api::api::storage::models::v2::Relation;
     use aruna_rust_api::api::storage::models::v2::RelationDirection;
     use aruna_rust_api::api::storage::models::v2::ResourceVariant;
@@ -499,7 +497,7 @@ mod tests {
             associated_id: DieselUlid::generate().to_string(),
             resource_variant: ResourceVariant::Project as i32,
         };
-        let relation_update =
+        let _relation_update =
             create_relation_update(&associated_id.to_string(), ResourceVariant::Project);
         let event_message =
             create_resource_event(ResourceEventType::Created, resource.clone(), None, None);

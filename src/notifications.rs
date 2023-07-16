@@ -393,6 +393,10 @@ impl NotificationCache {
         Some(())
     }
 
+    pub fn get_user_perm(&self, perm: &DieselUlid) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
+        self.cache.get_permissions(perm)
+    }
+
     pub fn get_user_perm_by_oidc(&self, oidc: &str) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
         self.cache.get_user_perm_by_oidc(oidc)
     }

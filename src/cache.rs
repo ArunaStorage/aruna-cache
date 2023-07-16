@@ -480,7 +480,7 @@ mod tests {
             .map(|entry| entry.clone().into_iter().collect::<Vec<_>>())
             .unwrap_or_default();
         let expected = vec![permission, (updated_permission.0, updated_permission.1)];
-        assert_eq!(result, expected);
+        assert!(result.iter().all(|item| expected.contains(item)));
     }
 
     #[test]

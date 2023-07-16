@@ -65,8 +65,58 @@ impl Cache {
         Ok(return_vec)
     }
 
+    pub fn get_parents_with_targets(&self, from: &Resource, targets: Vec<Resource>) -> Result<()> {
+        match &from {
+            Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),
+            Resource::Collection(_) => {
+                for ref_val in self.graph_cache.iter() {
+                    if ref_val.value().contains(from) && targets.contains(ref_val.key()){
+                        return Ok(())
+                    }
+                }
+            }
+            Resource::Dataset(_) => {
+                for ref1_val in self.graph_cache.iter() {
+                    if ref1_val.value().contains(from) {
+                        if targets.contains(ref1_val.key()) {
+                            return Ok(())
+                        }
+                        for ref2_val in self.graph_cache.iter() {
+                            if ref2_val.value().contains(ref1_val.key()) && targets.contains(ref2_val.key()){
+                                return Ok(())
+                            }
+                        }
+                    }
+                }
+            }
+            Resource::Object(_) => {
+                for ref1_val in self.graph_cache.iter() {
+                    if ref1_val.value().contains(from) {
+                        if targets.contains(ref1_val.key()) {
+                            return Ok(())
+                        }
+                        for ref2_val in self.graph_cache.iter() {
+                            if ref2_val.value().contains(ref1_val.key()) {
+                                if targets.contains(ref2_val.key()) {
+                                    return Ok(())
+                                }
+                                for ref3_val in self.graph_cache.iter() {
+                                    if ref3_val.value().contains(ref2_val.key()) && targets.contains(ref2_val.key()){
+                                        return Ok(())
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Err(anyhow!("Cannot find from resource: {:#?}", &from))
+    }
+
     // Gets a list of parent -> child connections, always from parent to child
     pub fn get_parents(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
+        // TODO: This will only match one possible traversal path
         let mut return_vec = Vec::new();
         match &from {
             Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),

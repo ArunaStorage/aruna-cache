@@ -161,7 +161,11 @@ impl NotificationCache {
                                                     Resource::try_from(r).ok()?.into(),
                                                     p.permission_level(),
                                                 ),
-                                            )
+                                            );
+                                            self.cache.add_user_token(
+                                                DieselUlid::from_str(&t.id).ok()?,
+                                                DieselUlid::from_str(&message.user_id).ok()?,
+                                            );
                                         } else {
                                             let user_perm = self.cache.get_permissions(
                                                 &DieselUlid::from_str(&message.user_id).ok()?,
@@ -173,6 +177,10 @@ impl NotificationCache {
                                                     perm,
                                                 )
                                             }
+                                            self.cache.add_user_token(
+                                                DieselUlid::from_str(&t.id).ok()?,
+                                                DieselUlid::from_str(&message.user_id).ok()?,
+                                            );
                                         }
                                     }
                                 }
@@ -200,11 +208,15 @@ impl NotificationCache {
                                 Some(ResourcePermission::GlobalAdmin),
                                 false,
                             ),
-                            user_event_context::Event::Token(t) => self.cache.remove_permission(
-                                DieselUlid::from_str(&t.id).ok()?,
-                                None,
-                                true,
-                            ),
+                            user_event_context::Event::Token(t) => {
+                                self.cache.remove_permission(
+                                    DieselUlid::from_str(&t.id).ok()?,
+                                    None,
+                                    true,
+                                );
+                                self.cache
+                                    .remove_user_token(DieselUlid::from_str(&t.id).ok()?);
+                            }
                             user_event_context::Event::Permission(perm) => {
                                 self.cache.remove_permission(
                                     DieselUlid::from_str(&message.user_id).ok()?,

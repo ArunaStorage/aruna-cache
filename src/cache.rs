@@ -15,10 +15,10 @@ pub struct Cache {
     pub graph_cache: DashMap<Resource, DashSet<Resource, RandomState>, RandomState>,
     pub name_cache: DashMap<String, DashSet<Resource, RandomState>, RandomState>,
     pub shared_id_cache: DashMap<DieselUlid, DieselUlid, RandomState>,
-    pub object_cache: Option<DashMap<DieselUlid, ApiResource, RandomState>>,
+    pub object_cache: DashMap<DieselUlid, ApiResource, RandomState>,
     pub permissions:
         DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
-    pub pubkeys: DashSet<PubKey, RandomState>,
+    pub pubkeys: DashMap<i32, PubKey, RandomState>,
     pub oidc_ids: DashMap<String, DieselUlid, RandomState>,
     pub token_ids: DashMap<DieselUlid, DieselUlid, RandomState>,
 }
@@ -35,9 +35,9 @@ impl Cache {
             graph_cache: DashMap::with_hasher(RandomState::new()),
             name_cache: DashMap::with_hasher(RandomState::new()),
             shared_id_cache: DashMap::with_hasher(RandomState::new()),
-            object_cache: None,
+            object_cache: DashMap::with_hasher(RandomState::new()),
             permissions: DashMap::with_hasher(RandomState::new()),
-            pubkeys: DashSet::with_hasher(RandomState::new()),
+            pubkeys: DashMap::with_hasher(RandomState::new()),
             oidc_ids: DashMap::with_hasher(RandomState::new()),
             token_ids: DashMap::with_hasher(RandomState::new()),
         }
@@ -284,16 +284,20 @@ impl Cache {
         Some(return_vec)
     }
 
-    pub fn add_pubkey(&self, pk: PubKey) {
-        self.pubkeys.insert(pk);
+    pub fn add_pubkey(&self, id: i32, pk: PubKey) {
+        self.pubkeys.insert(id, pk);
     }
 
-    pub fn remove_pubkey(&self, pk: PubKey) {
-        self.pubkeys.remove(&pk);
+    pub fn remove_pubkey(&self, id: i32) {
+        self.pubkeys.remove(&id);
     }
 
     pub fn get_pubkeys(&self) -> Vec<PubKey> {
-        self.pubkeys.clone().into_iter().collect()
+        self.pubkeys
+            .to_owned()
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect()
     }
 
     pub fn add_oidc(&self, oidc_id: String, user_id: DieselUlid) {
@@ -336,9 +340,9 @@ mod tests {
             graph_cache: DashMap::with_hasher(RandomState::new()),
             name_cache: DashMap::with_hasher(RandomState::new()),
             shared_id_cache: DashMap::with_hasher(RandomState::new()),
-            object_cache: None,
+            object_cache: DashMap::with_hasher(RandomState::new()),
             permissions: DashMap::with_hasher(RandomState::new()),
-            pubkeys: DashSet::with_hasher(RandomState::new()),
+            pubkeys: DashMap::with_hasher(RandomState::new()),
             ..Default::default()
         };
 
@@ -673,10 +677,10 @@ mod tests {
         let pubkey = PubKey::DataProxy("pubkey".to_owned());
 
         // Test adding a pubkey
-        cache.add_pubkey(pubkey.clone());
+        cache.add_pubkey(1, pubkey.clone());
 
         // Check if the pubkey is present in the cache
-        assert!(cache.pubkeys.contains(&pubkey));
+        assert!(cache.pubkeys.contains_key(&1));
     }
 
     #[test]
@@ -686,14 +690,14 @@ mod tests {
         let pubkey_b = PubKey::DataProxy("pubkey_b".to_owned());
 
         // Add pubkeys to the cache
-        cache.add_pubkey(pubkey_a.clone());
-        cache.add_pubkey(pubkey_b.clone());
+        cache.add_pubkey(1, pubkey_a.clone());
+        cache.add_pubkey(2, pubkey_b.clone());
 
         // Test removing a pubkey
-        cache.remove_pubkey(pubkey_a.clone());
+        cache.remove_pubkey(1);
 
         // Check if the pubkey is removed from the cache
-        assert!(!cache.pubkeys.contains(&pubkey_a));
+        assert!(!cache.pubkeys.contains_key(&1));
     }
 
     #[test]
@@ -702,10 +706,10 @@ mod tests {
         let pubkey = PubKey::DataProxy("pubkey".to_owned());
 
         // Test adding a pubkey
-        cache.add_pubkey(pubkey.clone());
+        cache.add_pubkey(1, pubkey.clone());
 
         // Check if the pubkey is present in the cache
-        assert!(cache.pubkeys.contains(&pubkey));
+        assert!(cache.pubkeys.contains_key(&1));
 
         assert_eq!(cache.get_pubkeys().len(), 1);
     }

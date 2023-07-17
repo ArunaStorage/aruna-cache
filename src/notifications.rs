@@ -9,24 +9,31 @@ use aruna_rust_api::api::notification::services::v2::event_message::MessageVaria
 use aruna_rust_api::api::notification::services::v2::event_notification_service_client::{
     self, EventNotificationServiceClient,
 };
-use aruna_rust_api::api::notification::services::v2::resource_event_context::Event;
-use aruna_rust_api::api::notification::services::v2::user_event_context;
 use aruna_rust_api::api::notification::services::v2::AcknowledgeMessageBatchRequest;
 use aruna_rust_api::api::notification::services::v2::AnouncementEvent;
 use aruna_rust_api::api::notification::services::v2::EventMessage;
 use aruna_rust_api::api::notification::services::v2::GetEventMessageBatchStreamRequest;
-use aruna_rust_api::api::notification::services::v2::RelationUpdate;
 use aruna_rust_api::api::notification::services::v2::Reply;
 use aruna_rust_api::api::notification::services::v2::ResourceEvent;
-use aruna_rust_api::api::notification::services::v2::ResourceEventType;
 use aruna_rust_api::api::notification::services::v2::UserEvent;
-use aruna_rust_api::api::notification::services::v2::UserEventType;
 use aruna_rust_api::api::storage::models::v2::internal_relation::Variant;
 use aruna_rust_api::api::storage::models::v2::relation::Relation;
 use aruna_rust_api::api::storage::models::v2::InternalRelation;
 use aruna_rust_api::api::storage::models::v2::PermissionLevel;
 use aruna_rust_api::api::storage::models::v2::RelationDirection;
 use aruna_rust_api::api::storage::models::v2::ResourceVariant;
+use aruna_rust_api::api::storage::services::v2::collection_service_client;
+use aruna_rust_api::api::storage::services::v2::collection_service_client::CollectionServiceClient;
+use aruna_rust_api::api::storage::services::v2::dataset_service_client;
+use aruna_rust_api::api::storage::services::v2::dataset_service_client::DatasetServiceClient;
+use aruna_rust_api::api::storage::services::v2::endpoint_service_client;
+use aruna_rust_api::api::storage::services::v2::endpoint_service_client::EndpointServiceClient;
+use aruna_rust_api::api::storage::services::v2::object_service_client;
+use aruna_rust_api::api::storage::services::v2::object_service_client::ObjectServiceClient;
+use aruna_rust_api::api::storage::services::v2::project_service_client;
+use aruna_rust_api::api::storage::services::v2::project_service_client::ProjectServiceClient;
+use aruna_rust_api::api::storage::services::v2::user_service_client;
+use aruna_rust_api::api::storage::services::v2::user_service_client::UserServiceClient;
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
 use tonic::codegen::InterceptedService;
@@ -57,6 +64,13 @@ impl tonic::service::Interceptor for ClientInterceptor {
 pub struct NotificationCache {
     notification_service:
         Option<EventNotificationServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
+    project_service: Option<ProjectServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
+    collection_service:
+        Option<CollectionServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
+    dataset_service: Option<DatasetServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
+    object_service: Option<ObjectServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
+    user_service: Option<UserServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
+    endpoint_service: Option<EndpointServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
     pub cache: Cache,
 }
 
@@ -71,17 +85,52 @@ impl NotificationCache {
 
         let notification_service =
             event_notification_service_client::EventNotificationServiceClient::with_interceptor(
-                channel,
-                interceptor,
+                channel.clone(),
+                interceptor.clone(),
             );
+
+        let project_service = project_service_client::ProjectServiceClient::with_interceptor(
+            channel.clone(),
+            interceptor.clone(),
+        );
+
+        let collection_service =
+            collection_service_client::CollectionServiceClient::with_interceptor(
+                channel.clone(),
+                interceptor.clone(),
+            );
+
+        let dataset_service = dataset_service_client::DatasetServiceClient::with_interceptor(
+            channel.clone(),
+            interceptor.clone(),
+        );
+
+        let object_service = object_service_client::ObjectServiceClient::with_interceptor(
+            channel.clone(),
+            interceptor.clone(),
+        );
+
+        let user_service = user_service_client::UserServiceClient::with_interceptor(
+            channel.clone(),
+            interceptor.clone(),
+        );
+
+        let endpoint_service =
+            endpoint_service_client::EndpointServiceClient::with_interceptor(channel, interceptor);
 
         Ok(NotificationCache {
             notification_service: Some(notification_service),
+            project_service: Some(project_service),
+            collection_service: Some(collection_service),
+            dataset_service: Some(dataset_service),
+            object_service: Some(object_service),
+            user_service: Some(user_service),
+            endpoint_service: Some(endpoint_service),
             cache: Cache::new(),
         })
     }
 
-    pub async fn create_channel(&mut self, streamgroup: String) -> Result<()> {
+    pub async fn create_notifications_channel(&mut self, streamgroup: String) -> Result<()> {
         let stream = self
             .notification_service
             .as_mut()

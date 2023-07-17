@@ -1,11 +1,15 @@
+use std::str::FromStr;
+
 use crate::structs::PubKey;
 use crate::structs::{Resource, ResourcePermission};
 use ahash::RandomState;
 use anyhow::anyhow;
 use anyhow::Result;
+use aruna_rust_api::api::storage::models::v2::permission::ResourceId;
 use aruna_rust_api::api::storage::models::v2::{
     generic_resource::Resource as ApiResource, PermissionLevel,
 };
+use aruna_rust_api::api::storage::services::v2::{GetPubkeysResponse, GetUserRedactedResponse};
 use dashmap::{DashMap, DashSet};
 use diesel_ulid::DieselUlid;
 
@@ -292,6 +296,25 @@ impl Cache {
         self.pubkeys.remove(&id);
     }
 
+    pub fn set_pubkeys(&self, pks: GetPubkeysResponse) {
+        let new_pk: DashMap<i32, PubKey, RandomState> = DashMap::with_hasher(RandomState::new());
+        for pk in pks.pubkeys {
+            let split = pk.location.split("_").collect::<Vec<_>>();
+            if split.contains(&"proxy") {
+                new_pk.insert(
+                    pk.id,
+                    PubKey::DataProxy(split.last().unwrap_or(&"proxy").to_string()),
+                );
+            } else {
+                new_pk.insert(
+                    pk.id,
+                    PubKey::Server(split.last().unwrap_or(&"proxy").to_string()),
+                );
+            }
+        }
+        self.pubkeys = new_pk;
+    }
+
     pub fn get_pubkeys(&self) -> Vec<PubKey> {
         self.pubkeys
             .to_owned()
@@ -324,6 +347,107 @@ impl Cache {
 
     pub fn get_user_by_token(&self, token_id: DieselUlid) -> Option<DieselUlid> {
         self.token_ids.get(&token_id).map(|e| e.value().clone())
+    }
+
+    pub fn remove_all_tokens_by_user(&self, user_id: DieselUlid) {
+        for (t, id) in self.token_ids.clone() {
+            // Remove all tokens and permissions
+            if id == user_id {
+                self.permissions.remove(&t);
+                self.token_ids.remove(&t);
+            }
+        }
+    }
+
+    pub fn parse_and_update_user_info(&self, uinfo: GetUserRedactedResponse) -> Option<()> {
+        let uid = DieselUlid::from_str(&uinfo.user?.id).ok()?;
+        let user_attributes = uinfo.user?.attributes?;
+
+        self.remove_all_tokens_by_user(uid);
+        let user_perm: DashMap<ResourcePermission, PermissionLevel, RandomState> =
+            DashMap::with_hasher(RandomState::new());
+
+        if user_attributes.global_admin {
+            user_perm.insert(ResourcePermission::GlobalAdmin, PermissionLevel::Admin);
+        }
+
+        if user_attributes.service_account {
+            user_perm.insert(ResourcePermission::ServiceAccount, PermissionLevel::None);
+        }
+
+        for p in user_attributes.personal_permissions {
+            let res_id = p.resource_id?;
+            match res_id {
+                ResourceId::ProjectId(pid) => user_perm.insert(
+                    ResourcePermission::Resource(Resource::Project(
+                        DieselUlid::from_str(&pid).ok()?,
+                    )),
+                    p.permission_level(),
+                ),
+                ResourceId::CollectionId(cid) => user_perm.insert(
+                    ResourcePermission::Resource(Resource::Collection(
+                        DieselUlid::from_str(&cid).ok()?,
+                    )),
+                    p.permission_level(),
+                ),
+                ResourceId::DatasetId(did) => user_perm.insert(
+                    ResourcePermission::Resource(Resource::Dataset(
+                        DieselUlid::from_str(&did).ok()?,
+                    )),
+                    p.permission_level(),
+                ),
+                ResourceId::ObjectId(oid) => user_perm.insert(
+                    ResourcePermission::Resource(Resource::Object(
+                        DieselUlid::from_str(&oid).ok()?,
+                    )),
+                    p.permission_level(),
+                ),
+            };
+        }
+
+        for t in user_attributes.tokens {
+            let token_id = DieselUlid::from_str(&t.id).ok()?;
+            match t.permission {
+                Some(perm) => {
+                    let map: DashMap<ResourcePermission, PermissionLevel, RandomState> =
+                        DashMap::with_hasher(RandomState::new());
+                    let res_id = perm.resource_id?;
+                    match res_id {
+                        ResourceId::ProjectId(pid) => map.insert(
+                            ResourcePermission::Resource(Resource::Project(
+                                DieselUlid::from_str(&pid).ok()?,
+                            )),
+                            perm.permission_level(),
+                        ),
+                        ResourceId::CollectionId(cid) => map.insert(
+                            ResourcePermission::Resource(Resource::Collection(
+                                DieselUlid::from_str(&cid).ok()?,
+                            )),
+                            perm.permission_level(),
+                        ),
+                        ResourceId::DatasetId(did) => map.insert(
+                            ResourcePermission::Resource(Resource::Dataset(
+                                DieselUlid::from_str(&did).ok()?,
+                            )),
+                            perm.permission_level(),
+                        ),
+                        ResourceId::ObjectId(oid) => map.insert(
+                            ResourcePermission::Resource(Resource::Object(
+                                DieselUlid::from_str(&oid).ok()?,
+                            )),
+                            perm.permission_level(),
+                        ),
+                    };
+                    self.permissions.insert(token_id, map);
+                }
+                None => {
+                    self.add_user_token(uid, token_id);
+                    self.permissions.insert(token_id, user_perm.clone());
+                }
+            }
+        }
+
+        Some(())
     }
 }
 

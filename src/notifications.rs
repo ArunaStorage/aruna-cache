@@ -1,10 +1,10 @@
 use crate::cache::Cache;
+use crate::persistence::Persistence;
 use crate::structs::Resource;
-use crate::structs::ResourcePermission;
 use crate::utils::GetRef;
 use anyhow::anyhow;
 use anyhow::Result;
-use aruna_rust_api::api::notification::services::v2::anouncement_event::EventVariant;
+use aruna_rust_api::api::notification::services::v2::anouncement_event;
 use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
 use aruna_rust_api::api::notification::services::v2::event_notification_service_client::{
     self, EventNotificationServiceClient,
@@ -12,6 +12,7 @@ use aruna_rust_api::api::notification::services::v2::event_notification_service_
 use aruna_rust_api::api::notification::services::v2::AcknowledgeMessageBatchRequest;
 use aruna_rust_api::api::notification::services::v2::AnouncementEvent;
 use aruna_rust_api::api::notification::services::v2::EventMessage;
+use aruna_rust_api::api::notification::services::v2::EventVariant;
 use aruna_rust_api::api::notification::services::v2::GetEventMessageBatchStreamRequest;
 use aruna_rust_api::api::notification::services::v2::Reply;
 use aruna_rust_api::api::notification::services::v2::ResourceEvent;
@@ -19,7 +20,6 @@ use aruna_rust_api::api::notification::services::v2::UserEvent;
 use aruna_rust_api::api::storage::models::v2::internal_relation::Variant;
 use aruna_rust_api::api::storage::models::v2::relation::Relation;
 use aruna_rust_api::api::storage::models::v2::InternalRelation;
-use aruna_rust_api::api::storage::models::v2::PermissionLevel;
 use aruna_rust_api::api::storage::models::v2::RelationDirection;
 use aruna_rust_api::api::storage::models::v2::ResourceVariant;
 use aruna_rust_api::api::storage::services::v2::collection_service_client;
@@ -32,8 +32,12 @@ use aruna_rust_api::api::storage::services::v2::object_service_client;
 use aruna_rust_api::api::storage::services::v2::object_service_client::ObjectServiceClient;
 use aruna_rust_api::api::storage::services::v2::project_service_client;
 use aruna_rust_api::api::storage::services::v2::project_service_client::ProjectServiceClient;
+use aruna_rust_api::api::storage::services::v2::storage_status_service_client;
+use aruna_rust_api::api::storage::services::v2::storage_status_service_client::StorageStatusServiceClient;
 use aruna_rust_api::api::storage::services::v2::user_service_client;
 use aruna_rust_api::api::storage::services::v2::user_service_client::UserServiceClient;
+use aruna_rust_api::api::storage::services::v2::GetPubkeysRequest;
+use aruna_rust_api::api::storage::services::v2::GetUserRedactedRequest;
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
 use tonic::codegen::InterceptedService;
@@ -71,6 +75,9 @@ pub struct NotificationCache {
     object_service: Option<ObjectServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
     user_service: Option<UserServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
     endpoint_service: Option<EndpointServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
+    storage_status_service:
+        Option<StorageStatusServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
+    persistence: Option<Persistence>,
     pub cache: Cache,
 }
 
@@ -115,8 +122,16 @@ impl NotificationCache {
             interceptor.clone(),
         );
 
-        let endpoint_service =
-            endpoint_service_client::EndpointServiceClient::with_interceptor(channel, interceptor);
+        let endpoint_service = endpoint_service_client::EndpointServiceClient::with_interceptor(
+            channel.clone(),
+            interceptor.clone(),
+        );
+
+        let storage_status_service =
+            storage_status_service_client::StorageStatusServiceClient::with_interceptor(
+                channel,
+                interceptor,
+            );
 
         Ok(NotificationCache {
             notification_service: Some(notification_service),
@@ -126,6 +141,8 @@ impl NotificationCache {
             object_service: Some(object_service),
             user_service: Some(user_service),
             endpoint_service: Some(endpoint_service),
+            storage_status_service: Some(storage_status_service),
+            persistence: None,
             cache: Cache::new(),
         })
     }
@@ -173,112 +190,47 @@ impl NotificationCache {
 
     async fn process_announcements_event(&self, message: AnouncementEvent) -> Option<Reply> {
         match message.event_variant? {
-            EventVariant::NewDataProxy(newdp_event) => {
-                self.cache
-                    .add_pubkey(crate::structs::PubKey::DataProxy(newdp_event.pubkey));
+            anouncement_event::EventVariant::NewPubkey(_)
+            | anouncement_event::EventVariant::RemovePubkey(_)
+            | anouncement_event::EventVariant::NewDataProxyId(_)
+            | anouncement_event::EventVariant::RemoveDataProxyId(_)
+            | anouncement_event::EventVariant::UpdateDataProxyId(_) => {
+                self.cache.set_pubkeys(
+                    self.storage_status_service
+                        .clone()
+                        .as_mut()?
+                        .get_pubkeys(Request::new(GetPubkeysRequest {}))
+                        .await
+                        .ok()?
+                        .into_inner(),
+                );
             }
-            EventVariant::RemoveDataProxy(rem_dp_event) => self
-                .cache
-                .remove_pubkey(crate::structs::PubKey::DataProxy(rem_dp_event.pubkey)),
-            EventVariant::Pubkey(pk_event) => self
-                .cache
-                .add_pubkey(crate::structs::PubKey::Server(pk_event.pubkey)),
-            _ => (),
+            anouncement_event::EventVariant::Downtime(_) => (),
+            anouncement_event::EventVariant::Version(_) => (),
         }
         message.reply
     }
 
     async fn process_user_event(&self, message: UserEvent) -> Option<Reply> {
-        match message.event_type() {
-            UserEventType::Created | UserEventType::Updated => {
-                if let Some(ctx) = message.context {
-                    if let Some(e) = ctx.event {
-                        match e {
-                            user_event_context::Event::Admin(_) => {
-                                self.cache.add_or_update_permission(
-                                    DieselUlid::from_str(&message.user_id).ok()?,
-                                    (ResourcePermission::GlobalAdmin, PermissionLevel::Admin),
-                                )
-                            }
-                            user_event_context::Event::Token(t) => {
-                                if let Some(p) = t.permission {
-                                    if let Some(r) = p.resource_id.clone() {
-                                        if p.permission_level() != PermissionLevel::Unspecified {
-                                            self.cache.add_or_update_permission(
-                                                DieselUlid::from_str(&t.id).ok()?,
-                                                (
-                                                    Resource::try_from(r).ok()?.into(),
-                                                    p.permission_level(),
-                                                ),
-                                            );
-                                            self.cache.add_user_token(
-                                                DieselUlid::from_str(&t.id).ok()?,
-                                                DieselUlid::from_str(&message.user_id).ok()?,
-                                            );
-                                        } else {
-                                            let user_perm = self.cache.get_permissions(
-                                                &DieselUlid::from_str(&message.user_id).ok()?,
-                                            )?;
+        match message.event_variant() {
+            EventVariant::Created | EventVariant::Available | EventVariant::Updated => {
+                let user_info = self
+                    .user_service
+                    .clone()
+                    .as_mut()?
+                    .get_user_redacted(Request::new(GetUserRedactedRequest {
+                        user_id: message.user_id,
+                    }))
+                    .await
+                    .ok()?
+                    .into_inner();
 
-                                            for perm in user_perm {
-                                                self.cache.add_or_update_permission(
-                                                    DieselUlid::from_str(&t.id).ok()?,
-                                                    perm,
-                                                )
-                                            }
-                                            self.cache.add_user_token(
-                                                DieselUlid::from_str(&t.id).ok()?,
-                                                DieselUlid::from_str(&message.user_id).ok()?,
-                                            );
-                                        }
-                                    }
-                                }
-                            }
-                            user_event_context::Event::Permission(perm) => {
-                                self.cache.add_or_update_permission(
-                                    DieselUlid::from_str(&message.user_id).ok()?,
-                                    (
-                                        Resource::try_from(perm.resource_id.clone()?).ok()?.into(),
-                                        perm.permission_level(),
-                                    ),
-                                );
-                            }
-                            _ => (),
-                        }
-                    }
-                }
+                self.cache.parse_and_update_user_info(user_info)?;
             }
-            UserEventType::Deleted => {
-                if let Some(ctx) = message.context {
-                    if let Some(e) = ctx.event {
-                        match e {
-                            user_event_context::Event::Admin(_) => self.cache.remove_permission(
-                                DieselUlid::from_str(&message.user_id).ok()?,
-                                Some(ResourcePermission::GlobalAdmin),
-                                false,
-                            ),
-                            user_event_context::Event::Token(t) => {
-                                self.cache.remove_permission(
-                                    DieselUlid::from_str(&t.id).ok()?,
-                                    None,
-                                    true,
-                                );
-                                self.cache
-                                    .remove_user_token(DieselUlid::from_str(&t.id).ok()?);
-                            }
-                            user_event_context::Event::Permission(perm) => {
-                                self.cache.remove_permission(
-                                    DieselUlid::from_str(&message.user_id).ok()?,
-                                    Some(
-                                        Resource::try_from(perm.resource_id.clone()?).ok()?.into(),
-                                    ),
-                                    false,
-                                );
-                            }
-                            _ => (),
-                        }
-                    }
-                }
+            EventVariant::Deleted => {
+                let uid = DieselUlid::from_str(&message.user_id).ok()?;
+                self.cache.remove_all_tokens_by_user(uid);
+                self.cache.remove_permission(uid, None, true)
             }
             _ => (),
         }

@@ -1,6 +1,6 @@
 [package]
 name = "aruna-cache"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 description = "A library to cache resources for AOS"
 repository = "https://github.com/ArunaStorage/aruna-cache"
@@ -9,12 +9,12 @@ license = "MIT OR Apache-2.0"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-anyhow = "1.0.71"
+anyhow = "1.0.72"
 dashmap = "5.5.0"
 diesel-ulid = "0.2.0"
 ahash = "0.8.3"
 aruna-rust-api = "2.0.0-alpha.4"
-tokio = {version = "1.28.2", features = ["full"]}
+tokio = {version = "1.29.1", features = ["full"]}
 tonic = {version = "0.9.2", features = ["tls"]}
 
 [dev-dependencies]

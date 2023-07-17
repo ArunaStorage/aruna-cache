@@ -1,5 +1,7 @@
-use std::str::FromStr;
-
+use crate::cache::Cache;
+use crate::structs::Resource;
+use crate::structs::ResourcePermission;
+use crate::utils::GetRef;
 use anyhow::anyhow;
 use anyhow::Result;
 use aruna_rust_api::api::notification::services::v2::anouncement_event::EventVariant;
@@ -26,16 +28,11 @@ use aruna_rust_api::api::storage::models::v2::PermissionLevel;
 use aruna_rust_api::api::storage::models::v2::RelationDirection;
 use aruna_rust_api::api::storage::models::v2::ResourceVariant;
 use diesel_ulid::DieselUlid;
+use std::str::FromStr;
 use tonic::codegen::InterceptedService;
 use tonic::metadata::{AsciiMetadataKey, AsciiMetadataValue};
 use tonic::transport::{Channel, ClientTlsConfig};
 use tonic::Request;
-
-use crate::cache::Cache;
-use crate::structs::PubKey;
-use crate::structs::Resource;
-use crate::structs::ResourcePermission;
-use crate::utils::GetRef;
 
 // Create a client interceptor which always adds the specified api token to the request header
 #[derive(Clone)]
@@ -60,7 +57,7 @@ impl tonic::service::Interceptor for ClientInterceptor {
 pub struct NotificationCache {
     notification_service:
         Option<EventNotificationServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
-    cache: Cache,
+    pub cache: Cache,
 }
 
 impl NotificationCache {
@@ -113,18 +110,6 @@ impl NotificationCache {
                 .await?;
         }
         Err(anyhow!("Stream was closed by sender"))
-    }
-
-    pub fn get_associated_id(&self, input: &DieselUlid) -> Option<DieselUlid> {
-        self.cache.get_associated_id(input)
-    }
-
-    pub fn get_parents(&self, input: &Resource) -> Result<Vec<(Resource, Resource)>> {
-        self.cache.get_parents(input)
-    }
-
-    pub fn traverse_graph(&self, input: &Resource) -> Result<Vec<(Resource, Resource)>> {
-        self.cache.traverse_graph(input)
     }
 
     async fn process_message(&self, message: EventMessage) -> Option<Reply> {
@@ -392,22 +377,6 @@ impl NotificationCache {
         }
         Some(())
     }
-
-    pub fn get_user_perm(&self, perm: &DieselUlid) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
-        self.cache.get_permissions(perm)
-    }
-
-    pub fn get_user_perm_by_oidc(&self, oidc: &str) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
-        self.cache.get_user_perm_by_oidc(oidc)
-    }
-
-    pub fn test_get_parents_with_target(&self, from: Resource, targets: Vec<Resource>) -> Result<()> {
-        self.cache.get_parents_with_targets(&from, targets)
-    }
-
-    pub fn get_pubkeys(&self) -> Vec<PubKey> {
-        self.cache.get_pubkeys()
-    }
 }
 
 #[cfg(test)]
@@ -504,8 +473,8 @@ mod tests {
                 }
             );
         }
-        assert_eq!(not_cache.get_associated_id(&id).unwrap(), aid);
-        assert_eq!(not_cache.get_associated_id(&aid).unwrap(), id);
+        assert_eq!(not_cache.cache.get_associated_id(&id).unwrap(), aid);
+        assert_eq!(not_cache.cache.get_associated_id(&aid).unwrap(), id);
 
         let res_id = DieselUlid::generate();
         let as_id = DieselUlid::generate();
@@ -525,15 +494,17 @@ mod tests {
             }
         );
 
-        assert_eq!(not_cache.get_associated_id(&res_id).unwrap(), as_id);
-        assert_eq!(not_cache.get_associated_id(&as_id).unwrap(), res_id);
+        assert_eq!(not_cache.cache.get_associated_id(&res_id).unwrap(), as_id);
+        assert_eq!(not_cache.cache.get_associated_id(&as_id).unwrap(), res_id);
 
         dbg!(&not_cache.cache.graph_cache);
         assert_eq!(
             not_cache
+                .cache
                 .get_parents(&crate::structs::Resource::Object(res_id.clone()))
                 .unwrap(),
             not_cache
+                .cache
                 .traverse_graph(&crate::structs::Resource::Project(aid))
                 .unwrap()
         );

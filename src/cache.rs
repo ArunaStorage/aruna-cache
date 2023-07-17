@@ -20,6 +20,7 @@ pub struct Cache {
         DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
     pub pubkeys: DashSet<PubKey, RandomState>,
     pub oidc_ids: DashMap<String, DieselUlid, RandomState>,
+    pub token_ids: DashMap<DieselUlid, DieselUlid, RandomState>,
 }
 
 impl Default for Cache {
@@ -38,6 +39,7 @@ impl Cache {
             permissions: DashMap::with_hasher(RandomState::new()),
             pubkeys: DashSet::with_hasher(RandomState::new()),
             oidc_ids: DashMap::with_hasher(RandomState::new()),
+            token_ids: DashMap::with_hasher(RandomState::new()),
         }
     }
 
@@ -300,9 +302,24 @@ impl Cache {
     pub fn remove_oidc(&self, oidc_id: &str) {
         self.oidc_ids.remove(oidc_id);
     }
-    pub fn get_user_perm_by_oidc(&self, oidc_id: &str) -> Option<Vec<(ResourcePermission, PermissionLevel)>>{
+    pub fn get_user_perm_by_oidc(
+        &self,
+        oidc_id: &str,
+    ) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
         let ulid = self.oidc_ids.get(oidc_id)?;
         self.get_permissions(&ulid)
+    }
+
+    pub fn add_user_token(&self, token_id: DieselUlid, user_id: DieselUlid) {
+        self.token_ids.insert(token_id, user_id);
+    }
+
+    pub fn remove_user_token(&self, token_id: DieselUlid) {
+        self.token_ids.remove(&token_id);
+    }
+
+    pub fn get_user_by_token(&self, token_id: DieselUlid) -> Option<DieselUlid> {
+        self.token_ids.get(&token_id).map(|e| e.value().clone())
     }
 }
 
@@ -752,9 +769,58 @@ mod tests {
             .unwrap();
         cache.add_link(dataset_a.clone(), object_a.clone()).unwrap();
 
-        assert!(cache.get_parents_with_targets(&object_a, vec![project_a.clone()]).is_ok());
-        assert!(cache.get_parents_with_targets(&object_a, vec![collection_d.clone()]).is_ok());
-        assert!(cache.get_parents_with_targets(&object_a, vec![dataset_a.clone()]).is_ok());
-        assert!(cache.get_parents_with_targets(&object_a, vec![project_b.clone()]).is_err());
+        assert!(cache
+            .get_parents_with_targets(&object_a, vec![project_a.clone()])
+            .is_ok());
+        assert!(cache
+            .get_parents_with_targets(&object_a, vec![collection_d.clone()])
+            .is_ok());
+        assert!(cache
+            .get_parents_with_targets(&object_a, vec![dataset_a.clone()])
+            .is_ok());
+        assert!(cache
+            .get_parents_with_targets(&object_a, vec![project_b.clone()])
+            .is_err());
+    }
+
+    #[test]
+    fn test_oidc() {
+        let cache = Cache::new();
+
+        let name = "a_name".to_string();
+        let id = DieselUlid::generate();
+
+        cache.add_oidc(name.clone(), id);
+
+        assert!(cache.get_user_perm_by_oidc(&name).is_none());
+
+        cache.add_or_update_permission(
+            id,
+            (ResourcePermission::GlobalAdmin, PermissionLevel::Admin),
+        );
+
+        assert!(
+            cache.get_user_perm_by_oidc(&name).unwrap()
+                == vec![(ResourcePermission::GlobalAdmin, PermissionLevel::Admin)]
+        );
+
+        cache.remove_oidc(&name);
+        assert!(cache.get_user_perm_by_oidc(&name).is_none());
+    }
+
+    #[test]
+    fn test_token_association() {
+        let cache = Cache::new();
+
+        let uid = DieselUlid::generate();
+        let tid = DieselUlid::generate();
+
+        cache.add_user_token(tid, uid);
+
+        assert_eq!(cache.get_user_by_token(tid).unwrap(), uid);
+
+        cache.remove_user_token(tid);
+
+        assert!(cache.get_user_by_token(tid).is_none());
     }
 }

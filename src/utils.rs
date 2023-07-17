@@ -11,23 +11,22 @@ pub trait GetRef {
 
 impl GetRef for ApiResource {
     fn get_ref(&self) -> Option<(DieselUlid, Resource)> {
-        let (associated_id, res) = match self.resource_variant() {
-            ResourceVariant::Project => (
+        let (res_id, associated_id) = if self.persistent_resource_id {
+            (
                 DieselUlid::from_str(&self.resource_id).ok()?,
-                Resource::Project(DieselUlid::from_str(&self.associated_id).ok()?),
-            ),
-            ResourceVariant::Collection => (
-                DieselUlid::from_str(&self.resource_id).ok()?,
-                Resource::Collection(DieselUlid::from_str(&self.associated_id).ok()?),
-            ),
-            ResourceVariant::Dataset => (
-                DieselUlid::from_str(&self.resource_id).ok()?,
-                Resource::Dataset(DieselUlid::from_str(&self.associated_id).ok()?),
-            ),
-            ResourceVariant::Object => (
                 DieselUlid::from_str(&self.associated_id).ok()?,
-                Resource::Object(DieselUlid::from_str(&self.resource_id).ok()?),
-            ),
+            )
+        } else {
+            (
+                DieselUlid::from_str(&self.associated_id).ok()?,
+                DieselUlid::from_str(&self.resource_id).ok()?,
+            )
+        };
+        let (associated_id, res) = match self.resource_variant() {
+            ResourceVariant::Project => (res_id, Resource::Project(associated_id)),
+            ResourceVariant::Collection => (res_id, Resource::Collection(associated_id)),
+            ResourceVariant::Dataset => (res_id, Resource::Dataset(associated_id)),
+            ResourceVariant::Object => (res_id, Resource::Object(associated_id)),
             _ => return None,
         };
 

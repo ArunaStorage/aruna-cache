@@ -238,8 +238,8 @@ impl NotificationCache {
     }
 
     async fn process_resource_event(&self, event: ResourceEvent) -> Option<Reply> {
-        match event.event_type() {
-            ResourceEventType::Created => {
+        match event.event_variant() {
+            EventVariant::Created => {
                 if let Some(r) = event.resource {
                     let (associated_id, res) = r.get_ref()?;
                     if let Some(ctx) = event.context {
@@ -251,7 +251,7 @@ impl NotificationCache {
                     self.cache.add_name(res, r.resource_name);
                 }
             }
-            ResourceEventType::Updated => {
+            EventVariant::Updated => {
                 if let Some(r) = event.resource {
                     let (_associated_id, res) = r.get_ref()?;
                     if let Some(ctx) = event.context {
@@ -270,7 +270,7 @@ impl NotificationCache {
                     }
                 }
             }
-            ResourceEventType::Deleted => {
+            EventVariant::Deleted => {
                 if let Some(r) = event.resource {
                     let (_associated_id, res) = r.get_ref()?;
                     self.cache.remove_name(res.clone(), None);

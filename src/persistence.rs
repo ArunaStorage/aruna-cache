@@ -1,1 +1,1 @@
-pub struct Persistence {}
+pub struct _Persistence {}

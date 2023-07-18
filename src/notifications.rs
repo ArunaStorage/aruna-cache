@@ -1,5 +1,4 @@
 use crate::cache::Cache;
-use crate::persistence::Persistence;
 use crate::query::QueryHandler;
 use crate::utils::GetRef;
 use anyhow::anyhow;
@@ -19,26 +18,6 @@ use aruna_rust_api::api::notification::services::v2::ResourceEvent;
 use aruna_rust_api::api::notification::services::v2::UserEvent;
 use aruna_rust_api::api::storage::models::v2::generic_resource::Resource as ApiResource;
 use aruna_rust_api::api::storage::models::v2::ResourceVariant;
-use aruna_rust_api::api::storage::services::v2::collection_service_client;
-use aruna_rust_api::api::storage::services::v2::collection_service_client::CollectionServiceClient;
-use aruna_rust_api::api::storage::services::v2::dataset_service_client;
-use aruna_rust_api::api::storage::services::v2::dataset_service_client::DatasetServiceClient;
-use aruna_rust_api::api::storage::services::v2::endpoint_service_client;
-use aruna_rust_api::api::storage::services::v2::endpoint_service_client::EndpointServiceClient;
-use aruna_rust_api::api::storage::services::v2::object_service_client;
-use aruna_rust_api::api::storage::services::v2::object_service_client::ObjectServiceClient;
-use aruna_rust_api::api::storage::services::v2::project_service_client;
-use aruna_rust_api::api::storage::services::v2::project_service_client::ProjectServiceClient;
-use aruna_rust_api::api::storage::services::v2::storage_status_service_client;
-use aruna_rust_api::api::storage::services::v2::storage_status_service_client::StorageStatusServiceClient;
-use aruna_rust_api::api::storage::services::v2::user_service_client;
-use aruna_rust_api::api::storage::services::v2::user_service_client::UserServiceClient;
-use aruna_rust_api::api::storage::services::v2::GetCollectionRequest;
-use aruna_rust_api::api::storage::services::v2::GetDatasetRequest;
-use aruna_rust_api::api::storage::services::v2::GetObjectRequest;
-use aruna_rust_api::api::storage::services::v2::GetProjectRequest;
-use aruna_rust_api::api::storage::services::v2::GetPubkeysRequest;
-use aruna_rust_api::api::storage::services::v2::GetUserRedactedRequest;
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
 use tonic::codegen::InterceptedService;
@@ -240,7 +219,7 @@ mod tests {
     use aruna_rust_api::api::notification::services::v2::Resource as APIResource;
     use aruna_rust_api::api::notification::services::v2::ResourceEvent;
 
-    fn mtemplate(res: APIResource) -> EventMessage {
+    fn _mtemplate(res: APIResource) -> EventMessage {
         EventMessage {
             message_variant: Some(MessageVariant::ResourceEvent(ResourceEvent {
                 resource: Some(res.clone()),

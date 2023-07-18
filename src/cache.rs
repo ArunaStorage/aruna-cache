@@ -504,15 +504,30 @@ impl Cache {
         res: ApiResource,
         _shared_id: DieselUlid,
         persistent_resource: Resource,
-    ) {
+    ) -> Result<()> {
         if let Some(old) = self
             .object_cache
             .insert(persistent_resource.clone(), res.clone())
         {
-            let (_add_rel, _remove_rel, _name_update) =
-                self.check_updates(&old, &res, persistent_resource);
+            let (add_rel, remove_rel, name_update) =
+                self.check_updates(&old, &res, persistent_resource.clone());
+
+            if let Some((old_name, new_name)) = name_update {
+                self.remove_name(persistent_resource.clone(), Some(old_name));
+                self.add_name(persistent_resource.clone(), new_name);
+            }
+
+            for (from, to) in remove_rel {
+                self.remove_link(from, to);
+            }
+
+            for (from, to) in add_rel {
+                self.add_link(from, to)?;
+            }
         }
+        Ok(())
     }
+
 
     fn check_updates(
         &self,
@@ -588,7 +603,6 @@ impl Cache {
             if let Some(relation::Relation::Internal(int)) = &orel.relation {
                 if int.defined_variant() == InternalRelationVariant::BelongsTo {
                     let (from, to) = internal_relation_to_rel(origin.clone(), int.clone())?;
-
                     let new_rel_hit = new_rel.get(&from);
                     match new_rel_hit {
                         // If a new relation matches up an old one

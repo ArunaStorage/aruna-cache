@@ -166,7 +166,7 @@ impl NotificationCache {
                                 ApiResource::Project(project_info),
                                 shared_id,
                                 persistent_res,
-                            )
+                            ).ok()?
                         }
                         ResourceVariant::Collection => {
                             let cid = DieselUlid::from_str(&r.resource_id).ok()?;
@@ -176,7 +176,7 @@ impl NotificationCache {
                                 ApiResource::Collection(collection_info),
                                 shared_id,
                                 persistent_res,
-                            )
+                            ).ok()?
                         }
                         ResourceVariant::Dataset => {
                             let did = DieselUlid::from_str(&r.resource_id).ok()?;
@@ -186,7 +186,7 @@ impl NotificationCache {
                                 ApiResource::Dataset(dataset_info),
                                 shared_id,
                                 persistent_res,
-                            )
+                            ).ok()?
                         }
                         ResourceVariant::Object => {
                             let oid = DieselUlid::from_str(&r.resource_id).ok()?;
@@ -195,7 +195,7 @@ impl NotificationCache {
                                 ApiResource::Object(object_info),
                                 shared_id,
                                 persistent_res,
-                            )
+                            ).ok()?
                         }
                         _ => (),
                     }

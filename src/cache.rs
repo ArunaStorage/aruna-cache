@@ -345,22 +345,21 @@ impl Cache {
     }
 
     pub fn set_pubkeys(&self, pks: GetPubkeysResponse) {
-        let new_pk: DashMap<i32, PubKey, RandomState> = DashMap::with_hasher(RandomState::new());
+        self.pubkeys.clear();
         for pk in pks.pubkeys {
             let split = pk.location.split("_").collect::<Vec<_>>();
             if split.contains(&"proxy") {
-                new_pk.insert(
+                self.pubkeys.insert(
                     pk.id,
                     PubKey::DataProxy(split.last().unwrap_or(&"proxy").to_string()),
                 );
             } else {
-                new_pk.insert(
+                self.pubkeys.insert(
                     pk.id,
                     PubKey::Server(split.last().unwrap_or(&"proxy").to_string()),
                 );
             }
         }
-        self.pubkeys = new_pk;
     }
 
     pub fn get_pubkeys(&self) -> Vec<PubKey> {
@@ -408,7 +407,7 @@ impl Cache {
     }
 
     pub fn parse_and_update_user_info(&self, uinfo: GetUserRedactedResponse) -> Option<()> {
-        let uid = DieselUlid::from_str(&uinfo.user?.id).ok()?;
+        let uid = DieselUlid::from_str(&uinfo.clone().user?.id).ok()?;
         let user_attributes = uinfo.user?.attributes?;
 
         self.remove_all_tokens_by_user(uid);
@@ -424,7 +423,7 @@ impl Cache {
         }
 
         for p in user_attributes.personal_permissions {
-            let res_id = p.resource_id?;
+            let res_id = p.clone().resource_id?;
             match res_id {
                 ResourceId::ProjectId(pid) => user_perm.insert(
                     ResourcePermission::Resource(Resource::Project(
@@ -459,7 +458,7 @@ impl Cache {
                 Some(perm) => {
                     let map: DashMap<ResourcePermission, PermissionLevel, RandomState> =
                         DashMap::with_hasher(RandomState::new());
-                    let res_id = perm.resource_id?;
+                    let res_id = perm.clone().resource_id?;
                     match res_id {
                         ResourceId::ProjectId(pid) => map.insert(
                             ResourcePermission::Resource(Resource::Project(
@@ -539,7 +538,9 @@ mod tests {
         let persistent_1 = DieselUlid::generate();
         let persistent_2 = DieselUlid::generate();
 
-        cache.add_or_update_shared(shared_1, persistent_1, ResourceVariant::Project);
+        cache
+            .add_or_update_shared(shared_1, persistent_1, ResourceVariant::Project)
+            .unwrap();
 
         assert_eq!(
             cache.get_shared(&persistent_1).unwrap(),
@@ -551,7 +552,9 @@ mod tests {
             Resource::Project(persistent_1)
         );
 
-        cache.add_or_update_shared(shared_1, persistent_2, ResourceVariant::Project);
+        cache
+            .add_or_update_shared(shared_1, persistent_2, ResourceVariant::Project)
+            .unwrap();
 
         assert_eq!(
             cache.get_shared(&persistent_2).unwrap(),

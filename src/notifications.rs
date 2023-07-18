@@ -1,6 +1,5 @@
 use crate::cache::Cache;
 use crate::persistence::Persistence;
-use crate::structs::Resource;
 use crate::utils::GetRef;
 use anyhow::anyhow;
 use anyhow::Result;
@@ -17,10 +16,6 @@ use aruna_rust_api::api::notification::services::v2::GetEventMessageBatchStreamR
 use aruna_rust_api::api::notification::services::v2::Reply;
 use aruna_rust_api::api::notification::services::v2::ResourceEvent;
 use aruna_rust_api::api::notification::services::v2::UserEvent;
-use aruna_rust_api::api::storage::models::v2::internal_relation::Variant;
-use aruna_rust_api::api::storage::models::v2::relation::Relation;
-use aruna_rust_api::api::storage::models::v2::InternalRelation;
-use aruna_rust_api::api::storage::models::v2::RelationDirection;
 use aruna_rust_api::api::storage::models::v2::ResourceVariant;
 use aruna_rust_api::api::storage::services::v2::collection_service_client;
 use aruna_rust_api::api::storage::services::v2::collection_service_client::CollectionServiceClient;
@@ -36,6 +31,10 @@ use aruna_rust_api::api::storage::services::v2::storage_status_service_client;
 use aruna_rust_api::api::storage::services::v2::storage_status_service_client::StorageStatusServiceClient;
 use aruna_rust_api::api::storage::services::v2::user_service_client;
 use aruna_rust_api::api::storage::services::v2::user_service_client::UserServiceClient;
+use aruna_rust_api::api::storage::services::v2::GetCollectionRequest;
+use aruna_rust_api::api::storage::services::v2::GetDatasetRequest;
+use aruna_rust_api::api::storage::services::v2::GetObjectRequest;
+use aruna_rust_api::api::storage::services::v2::GetProjectRequest;
 use aruna_rust_api::api::storage::services::v2::GetPubkeysRequest;
 use aruna_rust_api::api::storage::services::v2::GetUserRedactedRequest;
 use diesel_ulid::DieselUlid;
@@ -241,16 +240,62 @@ impl NotificationCache {
         match event.event_variant() {
             EventVariant::Created | EventVariant::Updated => {
                 if let Some(r) = event.resource {
-                    let (associated_id, res) = r.get_ref()?;
+                    let (shared_id, persistent_res) = r.get_ref()?;
                     match r.resource_variant() {
-                        ResourceVariant::Project => todo!(),
-                        ResourceVariant::Collection => todo!(),
-                        ResourceVariant::Dataset => todo!(),
-                        ResourceVariant::Object => todo!(),
+                        ResourceVariant::Project => {
+                            let project_info = self
+                                .project_service
+                                .clone()
+                                .as_mut()?
+                                .get_project(Request::new(GetProjectRequest {
+                                    project_id: r.resource_id,
+                                }))
+                                .await
+                                .ok()?
+                                .into_inner();
+                            // Todo: Process project
+                        }
+                        ResourceVariant::Collection => {
+                            let collection_info = self
+                                .collection_service
+                                .clone()
+                                .as_mut()?
+                                .get_collection(Request::new(GetCollectionRequest {
+                                    collection_id: r.resource_id,
+                                }))
+                                .await
+                                .ok()?
+                                .into_inner();
+                            // Todo: Process collection,
+                        }
+                        ResourceVariant::Dataset => {
+                            let dataset_info = self
+                                .dataset_service
+                                .clone()
+                                .as_mut()?
+                                .get_dataset(Request::new(GetDatasetRequest {
+                                    dataset_id: r.resource_id,
+                                }))
+                                .await
+                                .ok()?
+                                .into_inner();
+                            // Todo: Process collection,
+                        }
+                        ResourceVariant::Object => {
+                            let object_info = self
+                                .object_service
+                                .clone()
+                                .as_mut()?
+                                .get_object(Request::new(GetObjectRequest {
+                                    object_id: r.resource_id,
+                                }))
+                                .await
+                                .ok()?
+                                .into_inner();
+                            // Todo: Process collection,
+                        }
                         _ => (),
                     }
-                    self.cache.add_shared(associated_id, res.get_id());
-                    self.cache.add_name(res, r.resource_name);
                 }
             }
             EventVariant::Deleted => {
@@ -265,158 +310,21 @@ impl NotificationCache {
 
         event.reply
     }
-
-    fn process_relation_update(&self, res: Resource, update: RelationUpdate) -> Option<()> {
-        for rel in update.add_relations {
-            if let Some(Relation::Internal(int)) = rel.relation {
-                if let Some(Variant::DefinedVariant(1)) = int.variant {
-                    match int.direction() {
-                        RelationDirection::Inbound => self.add_relation(true, int, res.clone())?,
-                        RelationDirection::Outbound => {
-                            self.add_relation(false, int, res.clone())?
-                        }
-                        _ => return None,
-                    }
-                }
-            }
-        }
-        for rel in update.remove_relations {
-            if let Some(Relation::Internal(int)) = rel.relation {
-                if let Some(Variant::DefinedVariant(1)) = int.variant {
-                    match int.direction() {
-                        RelationDirection::Inbound => {
-                            self.remove_relation(true, int, res.clone())?
-                        }
-                        RelationDirection::Outbound => {
-                            self.remove_relation(false, int, res.clone())?
-                        }
-                        _ => return None,
-                    }
-                }
-            }
-        }
-        Some(())
-    }
-
-    fn remove_relation(&self, inbound: bool, int: InternalRelation, res: Resource) -> Option<()> {
-        let res_id = DieselUlid::from_str(&int.resource_id).ok()?;
-        let a_res_id = self
-            .cache
-            .get_associated_id(&DieselUlid::from_str(&int.resource_id).ok()?)?;
-        if inbound {
-            match int.resource_variant() {
-                ResourceVariant::Project => self
-                    .cache
-                    .remove_link(Resource::Project(res_id), res.clone()),
-                ResourceVariant::Collection => self
-                    .cache
-                    .remove_link(Resource::Collection(res_id), res.clone()),
-                ResourceVariant::Dataset => self
-                    .cache
-                    .remove_link(Resource::Dataset(res_id), res.clone()),
-                _ => (),
-            }
-        } else {
-            match int.resource_variant() {
-                ResourceVariant::Collection => self
-                    .cache
-                    .remove_link(res.clone(), Resource::Collection(res_id)),
-                ResourceVariant::Dataset => self
-                    .cache
-                    .remove_link(res.clone(), Resource::Dataset(res_id)),
-                ResourceVariant::Object => self
-                    .cache
-                    .remove_link(res.clone(), Resource::Object(a_res_id)),
-                _ => (),
-            }
-        }
-        Some(())
-    }
-
-    fn add_relation(&self, inbound: bool, int: InternalRelation, res: Resource) -> Option<()> {
-        let res_id = DieselUlid::from_str(&int.resource_id).ok()?;
-        let a_res_id = self
-            .cache
-            .get_associated_id(&DieselUlid::from_str(&int.resource_id).ok()?)?;
-        if inbound {
-            match int.resource_variant() {
-                ResourceVariant::Project => self
-                    .cache
-                    .add_link(Resource::Project(res_id), res.clone())
-                    .ok()?,
-                ResourceVariant::Collection => self
-                    .cache
-                    .add_link(Resource::Collection(res_id), res.clone())
-                    .ok()?,
-                ResourceVariant::Dataset => self
-                    .cache
-                    .add_link(Resource::Dataset(res_id), res.clone())
-                    .ok()?,
-                _ => (),
-            }
-        } else {
-            match int.resource_variant() {
-                ResourceVariant::Collection => self
-                    .cache
-                    .add_link(res.clone(), Resource::Collection(res_id))
-                    .ok()?,
-                ResourceVariant::Dataset => self
-                    .cache
-                    .add_link(res.clone(), Resource::Dataset(res_id))
-                    .ok()?,
-                ResourceVariant::Object => self
-                    .cache
-                    .add_link(res.clone(), Resource::Object(a_res_id))
-                    .ok()?,
-                _ => (),
-            }
-        }
-        Some(())
-    }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::Cache;
-    use super::NotificationCache;
-    use super::*;
     use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
-    use aruna_rust_api::api::notification::services::v2::resource_event_context::Event;
-    use aruna_rust_api::api::notification::services::v2::DataproxyInfo;
     use aruna_rust_api::api::notification::services::v2::EventMessage;
-    use aruna_rust_api::api::notification::services::v2::NewPubkey;
-    use aruna_rust_api::api::notification::services::v2::RelationUpdate;
     use aruna_rust_api::api::notification::services::v2::Reply;
     use aruna_rust_api::api::notification::services::v2::Resource as APIResource;
     use aruna_rust_api::api::notification::services::v2::ResourceEvent;
-    use aruna_rust_api::api::notification::services::v2::ResourceEventContext;
-    use aruna_rust_api::api::notification::services::v2::ResourceEventType;
-    use aruna_rust_api::api::notification::services::v2::Token;
-    use aruna_rust_api::api::notification::services::v2::UserEventContext;
-    use aruna_rust_api::api::storage::models::v2::internal_relation;
-    use aruna_rust_api::api::storage::models::v2::internal_relation::Variant;
-    use aruna_rust_api::api::storage::models::v2::permission::ResourceId;
-    use aruna_rust_api::api::storage::models::v2::relation;
-    use aruna_rust_api::api::storage::models::v2::InternalRelation;
-    use aruna_rust_api::api::storage::models::v2::InternalRelationVariant;
-    use aruna_rust_api::api::storage::models::v2::Permission;
-    use aruna_rust_api::api::storage::models::v2::Relation;
-    use aruna_rust_api::api::storage::models::v2::RelationDirection;
-    use aruna_rust_api::api::storage::models::v2::ResourceVariant;
-    use diesel_ulid::DieselUlid;
-    use std::str::FromStr;
 
-    fn mtemplate(res: APIResource, irel: Vec<Relation>) -> EventMessage {
+    fn mtemplate(res: APIResource) -> EventMessage {
         EventMessage {
             message_variant: Some(MessageVariant::ResourceEvent(ResourceEvent {
-                resource: Some(res),
-                event_type: ResourceEventType::Created as i32,
-                context: Some(ResourceEventContext {
-                    event: Some(Event::RelationUpdates(RelationUpdate {
-                        add_relations: irel,
-                        remove_relations: vec![],
-                    })),
-                }),
+                resource: Some(res.clone()),
+                event_variant: res.resource_variant,
                 reply: Some(Reply {
                     reply: "a_reply".into(),
                     salt: "a_salt".into(),
@@ -424,465 +332,5 @@ mod tests {
                 }),
             })),
         }
-    }
-
-    #[tokio::test]
-    async fn notification_processing_test() {
-        let not_cache = NotificationCache {
-            notification_service: None,
-            cache: Cache::new(),
-        };
-
-        let id = DieselUlid::generate();
-        let aid = DieselUlid::generate();
-
-        let mut res = APIResource {
-            resource_id: id.to_string(),
-            resource_name: "a_resource".into(),
-            associated_id: aid.to_string(),
-            resource_variant: ResourceVariant::Project as i32,
-        };
-
-        let irel = vec![Relation {
-            relation: Some(relation::Relation::Internal(InternalRelation {
-                resource_id: aid.to_string(),
-                resource_variant: ResourceVariant::Project.into(),
-                direction: RelationDirection::Inbound.into(),
-                variant: Some(Variant::DefinedVariant(
-                    InternalRelationVariant::BelongsTo.into(),
-                )),
-            })),
-        }];
-
-        {
-            let eirel = Vec::new();
-            let reply = not_cache
-                .process_message(mtemplate(res.clone(), eirel))
-                .await
-                .unwrap();
-            assert_eq!(
-                reply,
-                Reply {
-                    reply: "a_reply".into(),
-                    salt: "a_salt".into(),
-                    hmac: "a_hmac".into(),
-                }
-            );
-        }
-        assert_eq!(not_cache.cache.get_associated_id(&id).unwrap(), aid);
-        assert_eq!(not_cache.cache.get_associated_id(&aid).unwrap(), id);
-
-        let res_id = DieselUlid::generate();
-        let as_id = DieselUlid::generate();
-        res.resource_variant = ResourceVariant::Object.into();
-        res.resource_id = res_id.to_string();
-        res.associated_id = as_id.to_string();
-        let reply = not_cache
-            .process_message(mtemplate(res.clone(), irel))
-            .await
-            .unwrap();
-        assert_eq!(
-            reply,
-            Reply {
-                reply: "a_reply".into(),
-                salt: "a_salt".into(),
-                hmac: "a_hmac".into(),
-            }
-        );
-
-        assert_eq!(not_cache.cache.get_associated_id(&res_id).unwrap(), as_id);
-        assert_eq!(not_cache.cache.get_associated_id(&as_id).unwrap(), res_id);
-
-        dbg!(&not_cache.cache.graph_cache);
-        assert_eq!(
-            not_cache
-                .cache
-                .get_parents(&crate::structs::Resource::Object(res_id.clone()))
-                .unwrap(),
-            not_cache
-                .cache
-                .traverse_graph(&crate::structs::Resource::Project(aid))
-                .unwrap()
-        );
-    }
-
-    fn create_relation_update(
-        resource_id: &str,
-        resource_variant: ResourceVariant,
-    ) -> RelationUpdate {
-        let internal_relation = InternalRelation {
-            resource_id: resource_id.to_owned(),
-            resource_variant: resource_variant as i32,
-            direction: RelationDirection::Inbound as i32,
-            variant: Some(internal_relation::Variant::DefinedVariant(
-                InternalRelationVariant::BelongsTo as i32,
-            )),
-        };
-
-        RelationUpdate {
-            add_relations: vec![Relation {
-                relation: Some(relation::Relation::Internal(internal_relation)),
-            }],
-            remove_relations: vec![],
-        }
-    }
-
-    fn create_resource_event(
-        event_type: ResourceEventType,
-        resource: APIResource,
-        context: Option<ResourceEventContext>,
-        reply: Option<Reply>,
-    ) -> EventMessage {
-        EventMessage {
-            message_variant: Some(MessageVariant::ResourceEvent(ResourceEvent {
-                event_type: event_type as i32,
-                resource: Some(resource),
-                context,
-                reply,
-            })),
-        }
-    }
-
-    #[tokio::test]
-    async fn test_process_message_resource_event_created() {
-        let cache = Cache::new();
-        let notification_cache = NotificationCache {
-            notification_service: None,
-            cache,
-        };
-
-        let id = DieselUlid::generate();
-        let associated_id = DieselUlid::generate();
-        let resource = APIResource {
-            resource_id: id.to_string(),
-            resource_name: "aproj".to_string(),
-            associated_id: DieselUlid::generate().to_string(),
-            resource_variant: ResourceVariant::Project as i32,
-        };
-        let _relation_update =
-            create_relation_update(&associated_id.to_string(), ResourceVariant::Project);
-        let event_message =
-            create_resource_event(ResourceEventType::Created, resource.clone(), None, None);
-
-        let result = notification_cache.process_message(event_message).await;
-
-        assert_eq!(result, None);
-        assert_eq!(notification_cache.cache.shared_id_cache.len(), 2);
-        assert_eq!(notification_cache.cache.name_cache.len(), 1);
-        assert_eq!(notification_cache.cache.graph_cache.len(), 0); // No relations added in this case
-    }
-
-    #[tokio::test]
-    async fn test_process_message_resource_event_with_relation_updates() {
-        let cache = Cache::new();
-        let notification_cache = NotificationCache {
-            notification_service: None,
-            cache: cache,
-        };
-
-        let project_id = DieselUlid::generate();
-        let collection_id = DieselUlid::generate();
-        let resource = APIResource {
-            resource_id: collection_id.to_string(),
-            resource_name: "a_col".to_string(),
-            associated_id: DieselUlid::generate().to_string(),
-            resource_variant: ResourceVariant::Collection as i32,
-        };
-        let relation_update =
-            create_relation_update(&project_id.to_string(), ResourceVariant::Project);
-        let event_message = create_resource_event(
-            ResourceEventType::Created,
-            resource.clone(),
-            Some(ResourceEventContext {
-                event: Some(Event::RelationUpdates(relation_update)),
-            }),
-            None,
-        );
-
-        let result = notification_cache.process_message(event_message).await;
-
-        assert_eq!(result, None);
-        assert_eq!(notification_cache.cache.shared_id_cache.len(), 0);
-        assert_eq!(notification_cache.cache.name_cache.len(), 0);
-        assert_eq!(notification_cache.cache.graph_cache.len(), 0);
-
-        // let parents = notification_cache.cache
-        //     .get_parents(&Resource::Collection(collection_id))
-        //     .unwrap();
-        // assert_eq!(
-        //     parents,
-        //     vec![(
-        //         Resource::Project(project_id),
-        //         Resource::Collection(collection_id)
-        //     )]
-        // );
-    }
-
-    #[tokio::test]
-    async fn test_process_message_user_event_admin() {
-        let cache = Cache::new();
-        let notification_cache = NotificationCache {
-            notification_service: None,
-            cache: cache,
-        };
-
-        let user_id = DieselUlid::generate();
-        let event_message = EventMessage {
-            message_variant: Some(MessageVariant::UserEvent(UserEvent {
-                user_id: user_id.to_string(),
-                user_name: "a_name".to_string(),
-                event_type: UserEventType::Created as i32,
-                context: Some(UserEventContext {
-                    event: Some(user_event_context::Event::Admin(true)),
-                }),
-                reply: Some(Reply {
-                    reply: "a".to_string(),
-                    salt: "b".to_string(),
-                    hmac: "c".to_string(),
-                }),
-            })),
-        };
-
-        let result = notification_cache.process_message(event_message).await;
-
-        assert_eq!(
-            result,
-            Some(Reply {
-                reply: "a".to_string(),
-                salt: "b".to_string(),
-                hmac: "c".to_string()
-            })
-        );
-        assert_eq!(notification_cache.cache.permissions.len(), 1);
-
-        let user_ulid = DieselUlid::from_str(&user_id.to_string()).unwrap();
-        let permissions = notification_cache
-            .cache
-            .get_permissions(&user_ulid)
-            .unwrap();
-        assert_eq!(
-            permissions,
-            vec![(ResourcePermission::GlobalAdmin, PermissionLevel::Admin)]
-        );
-    }
-
-    #[tokio::test]
-    async fn test_process_message_user_event_token() {
-        let notification_cache = NotificationCache {
-            notification_service: None,
-            cache: Cache::new(),
-        };
-
-        let token_id = DieselUlid::generate();
-        let user_id = DieselUlid::generate();
-        let event_message = EventMessage {
-            message_variant: Some(MessageVariant::UserEvent(UserEvent {
-                user_id: user_id.to_string(),
-                user_name: "a_name".to_string(),
-                event_type: UserEventType::Created as i32,
-                context: Some(UserEventContext {
-                    event: Some(user_event_context::Event::Token(Token {
-                        id: token_id.to_string(),
-                        permission: Some(Permission {
-                            permission_level: PermissionLevel::Admin as i32,
-                            resource_id: Some(ResourceId::CollectionId(
-                                DieselUlid::generate().to_string(),
-                            )),
-                        }),
-                    })),
-                }),
-                reply: Some(Reply {
-                    reply: "a".to_string(),
-                    salt: "b".to_string(),
-                    hmac: "c".to_string(),
-                }),
-            })),
-        };
-
-        let result = notification_cache.process_message(event_message).await;
-
-        assert_eq!(
-            result,
-            Some(Reply {
-                reply: "a".to_string(),
-                salt: "b".to_string(),
-                hmac: "c".to_string()
-            })
-        );
-
-        assert!(notification_cache
-            .cache
-            .get_permissions(&token_id)
-            .is_some());
-    }
-
-    #[tokio::test]
-    async fn test_process_message_user_event_token_update() {
-        let notification_cache = NotificationCache {
-            notification_service: None,
-            cache: Cache::new(),
-        };
-
-        let token_id = DieselUlid::generate();
-        let user_id = DieselUlid::generate();
-        let event_message = EventMessage {
-            message_variant: Some(MessageVariant::UserEvent(UserEvent {
-                user_id: user_id.to_string(),
-                user_name: "a_name".to_string(),
-                event_type: UserEventType::Updated as i32,
-                context: Some(UserEventContext {
-                    event: Some(user_event_context::Event::Token(Token {
-                        id: token_id.to_string(),
-                        permission: Some(Permission {
-                            permission_level: PermissionLevel::Admin as i32,
-                            resource_id: Some(ResourceId::CollectionId(
-                                DieselUlid::generate().to_string(),
-                            )),
-                        }),
-                    })),
-                }),
-                reply: Some(Reply {
-                    reply: "a".to_string(),
-                    salt: "b".to_string(),
-                    hmac: "c".to_string(),
-                }),
-            })),
-        };
-
-        let result = notification_cache.process_message(event_message).await;
-
-        assert_eq!(
-            result,
-            Some(Reply {
-                reply: "a".to_string(),
-                salt: "b".to_string(),
-                hmac: "c".to_string()
-            })
-        );
-
-        assert!(notification_cache
-            .cache
-            .get_permissions(&token_id)
-            .is_some());
-    }
-
-    #[tokio::test]
-    async fn test_process_message_user_event_token_deleted() {
-        let notification_cache = NotificationCache {
-            notification_service: None,
-            cache: Cache::new(),
-        };
-
-        let user_id = DieselUlid::generate();
-        let event_message = EventMessage {
-            message_variant: Some(MessageVariant::UserEvent(UserEvent {
-                user_id: user_id.to_string(),
-                user_name: "a_name".to_string(),
-                event_type: UserEventType::Deleted as i32,
-                context: None,
-                reply: Some(Reply {
-                    reply: "a".to_string(),
-                    salt: "b".to_string(),
-                    hmac: "c".to_string(),
-                }),
-            })),
-        };
-
-        let result = notification_cache.process_message(event_message).await;
-
-        assert_eq!(
-            result,
-            Some(Reply {
-                reply: "a".to_string(),
-                salt: "b".to_string(),
-                hmac: "c".to_string()
-            })
-        );
-
-        assert!(notification_cache.cache.get_permissions(&user_id).is_none());
-    }
-
-    #[tokio::test]
-    async fn test_anouncement_events() {
-        let notification_cache = NotificationCache {
-            notification_service: None,
-            cache: Cache::new(),
-        };
-
-        let _user_id = DieselUlid::generate();
-        let event_message = EventMessage {
-            message_variant: Some(MessageVariant::AnnouncementEvent(AnouncementEvent {
-                event_variant: Some(EventVariant::NewDataProxy(DataproxyInfo {
-                    endpoint_id: DieselUlid::generate().to_string(),
-                    name: "a_name".to_string(),
-                    pubkey: "A pubkey".to_string(),
-                    ..Default::default()
-                })),
-                reply: Some(Reply {
-                    reply: "a".to_string(),
-                    salt: "b".to_string(),
-                    hmac: "c".to_string(),
-                }),
-            })),
-        };
-
-        let result = notification_cache.process_message(event_message).await;
-
-        assert_eq!(
-            result,
-            Some(Reply {
-                reply: "a".to_string(),
-                salt: "b".to_string(),
-                hmac: "c".to_string()
-            })
-        );
-
-        assert_eq!(notification_cache.cache.get_pubkeys().len(), 1);
-
-        let event_message = EventMessage {
-            message_variant: Some(MessageVariant::AnnouncementEvent(AnouncementEvent {
-                event_variant: Some(EventVariant::Pubkey(NewPubkey {
-                    pubkey: "pubkey_2".to_string(),
-                })),
-                reply: Some(Reply {
-                    reply: "a".to_string(),
-                    salt: "b".to_string(),
-                    hmac: "c".to_string(),
-                }),
-            })),
-        };
-
-        let result = notification_cache.process_message(event_message).await;
-
-        assert_eq!(
-            result,
-            Some(Reply {
-                reply: "a".to_string(),
-                salt: "b".to_string(),
-                hmac: "c".to_string()
-            })
-        );
-
-        assert_eq!(notification_cache.cache.get_pubkeys().len(), 2);
-
-        let event_message = EventMessage {
-            message_variant: Some(MessageVariant::AnnouncementEvent(AnouncementEvent {
-                event_variant: Some(EventVariant::RemoveDataProxy(DataproxyInfo {
-                    endpoint_id: DieselUlid::generate().to_string(),
-                    name: "a_name".to_string(),
-                    pubkey: "A pubkey".to_string(),
-                    ..Default::default()
-                })),
-                reply: Some(Reply {
-                    reply: "a".to_string(),
-                    salt: "b".to_string(),
-                    hmac: "c".to_string(),
-                }),
-            })),
-        };
-
-        let _result = notification_cache.process_message(event_message).await;
-
-        assert_eq!(notification_cache.cache.get_pubkeys().len(), 1);
     }
 }

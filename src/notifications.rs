@@ -1,5 +1,6 @@
 use crate::cache::Cache;
 use crate::persistence::Persistence;
+use crate::query::QueryHandler;
 use crate::utils::GetRef;
 use anyhow::anyhow;
 use anyhow::Result;
@@ -16,6 +17,7 @@ use aruna_rust_api::api::notification::services::v2::GetEventMessageBatchStreamR
 use aruna_rust_api::api::notification::services::v2::Reply;
 use aruna_rust_api::api::notification::services::v2::ResourceEvent;
 use aruna_rust_api::api::notification::services::v2::UserEvent;
+use aruna_rust_api::api::storage::models::v2::generic_resource::Resource as ApiResource;
 use aruna_rust_api::api::storage::models::v2::ResourceVariant;
 use aruna_rust_api::api::storage::services::v2::collection_service_client;
 use aruna_rust_api::api::storage::services::v2::collection_service_client::CollectionServiceClient;
@@ -67,21 +69,17 @@ impl tonic::service::Interceptor for ClientInterceptor {
 pub struct NotificationCache {
     notification_service:
         Option<EventNotificationServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
-    project_service: Option<ProjectServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
-    collection_service:
-        Option<CollectionServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
-    dataset_service: Option<DatasetServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
-    object_service: Option<ObjectServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
-    user_service: Option<UserServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
-    endpoint_service: Option<EndpointServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
-    storage_status_service:
-        Option<StorageStatusServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
-    persistence: Option<Persistence>,
+
+    query: Box<dyn QueryHandler>,
     pub cache: Cache,
 }
 
 impl NotificationCache {
-    pub async fn new(token: impl Into<String>, server: impl Into<String>) -> Result<Self> {
+    pub async fn new(
+        token: impl Into<String>,
+        server: impl Into<String>,
+        qhandler: Box<dyn QueryHandler>,
+    ) -> Result<Self> {
         let tls_config = ClientTlsConfig::new();
         let endpoint = Channel::from_shared(server.into())?.tls_config(tls_config)?;
         let channel = endpoint.connect().await?;
@@ -95,53 +93,9 @@ impl NotificationCache {
                 interceptor.clone(),
             );
 
-        let project_service = project_service_client::ProjectServiceClient::with_interceptor(
-            channel.clone(),
-            interceptor.clone(),
-        );
-
-        let collection_service =
-            collection_service_client::CollectionServiceClient::with_interceptor(
-                channel.clone(),
-                interceptor.clone(),
-            );
-
-        let dataset_service = dataset_service_client::DatasetServiceClient::with_interceptor(
-            channel.clone(),
-            interceptor.clone(),
-        );
-
-        let object_service = object_service_client::ObjectServiceClient::with_interceptor(
-            channel.clone(),
-            interceptor.clone(),
-        );
-
-        let user_service = user_service_client::UserServiceClient::with_interceptor(
-            channel.clone(),
-            interceptor.clone(),
-        );
-
-        let endpoint_service = endpoint_service_client::EndpointServiceClient::with_interceptor(
-            channel.clone(),
-            interceptor.clone(),
-        );
-
-        let storage_status_service =
-            storage_status_service_client::StorageStatusServiceClient::with_interceptor(
-                channel,
-                interceptor,
-            );
-
         Ok(NotificationCache {
             notification_service: Some(notification_service),
-            project_service: Some(project_service),
-            collection_service: Some(collection_service),
-            dataset_service: Some(dataset_service),
-            object_service: Some(object_service),
-            user_service: Some(user_service),
-            endpoint_service: Some(endpoint_service),
-            storage_status_service: Some(storage_status_service),
-            persistence: None,
+            query: qhandler,
             cache: Cache::new(),
         })
     }
@@ -194,15 +148,7 @@ impl NotificationCache {
             | anouncement_event::EventVariant::NewDataProxyId(_)
             | anouncement_event::EventVariant::RemoveDataProxyId(_)
             | anouncement_event::EventVariant::UpdateDataProxyId(_) => {
-                self.cache.set_pubkeys(
-                    self.storage_status_service
-                        .clone()
-                        .as_mut()?
-                        .get_pubkeys(Request::new(GetPubkeysRequest {}))
-                        .await
-                        .ok()?
-                        .into_inner(),
-                );
+                self.cache.set_pubkeys(self.query.get_pubkeys().await.ok()?);
             }
             anouncement_event::EventVariant::Downtime(_) => (),
             anouncement_event::EventVariant::Version(_) => (),
@@ -213,17 +159,8 @@ impl NotificationCache {
     async fn process_user_event(&self, message: UserEvent) -> Option<Reply> {
         match message.event_variant() {
             EventVariant::Created | EventVariant::Available | EventVariant::Updated => {
-                let user_info = self
-                    .user_service
-                    .clone()
-                    .as_mut()?
-                    .get_user_redacted(Request::new(GetUserRedactedRequest {
-                        user_id: message.user_id,
-                    }))
-                    .await
-                    .ok()?
-                    .into_inner();
-
+                let uid = DieselUlid::from_str(&message.user_id).ok()?;
+                let user_info = self.query.get_user(uid).await.ok()?;
                 self.cache.parse_and_update_user_info(user_info)?;
             }
             EventVariant::Deleted => {
@@ -243,56 +180,40 @@ impl NotificationCache {
                     let (shared_id, persistent_res) = r.get_ref()?;
                     match r.resource_variant() {
                         ResourceVariant::Project => {
-                            let project_info = self
-                                .project_service
-                                .clone()
-                                .as_mut()?
-                                .get_project(Request::new(GetProjectRequest {
-                                    project_id: r.resource_id,
-                                }))
-                                .await
-                                .ok()?
-                                .into_inner();
-                            // Todo: Process project
+                            let pid = DieselUlid::from_str(&r.resource_id).ok()?;
+                            let project_info = self.query.get_project(pid).await.ok()?;
+                            self.cache.process_api_resource_update(
+                                ApiResource::Project(project_info),
+                                shared_id,
+                                persistent_res,
+                            )
                         }
                         ResourceVariant::Collection => {
-                            let collection_info = self
-                                .collection_service
-                                .clone()
-                                .as_mut()?
-                                .get_collection(Request::new(GetCollectionRequest {
-                                    collection_id: r.resource_id,
-                                }))
-                                .await
-                                .ok()?
-                                .into_inner();
-                            // Todo: Process collection,
+                            let cid = DieselUlid::from_str(&r.resource_id).ok()?;
+                            let collection_info = self.query.get_collection(cid).await.ok()?;
+                            self.cache.process_api_resource_update(
+                                ApiResource::Collection(collection_info),
+                                shared_id,
+                                persistent_res,
+                            )
                         }
                         ResourceVariant::Dataset => {
-                            let dataset_info = self
-                                .dataset_service
-                                .clone()
-                                .as_mut()?
-                                .get_dataset(Request::new(GetDatasetRequest {
-                                    dataset_id: r.resource_id,
-                                }))
-                                .await
-                                .ok()?
-                                .into_inner();
-                            // Todo: Process collection,
+                            let did = DieselUlid::from_str(&r.resource_id).ok()?;
+                            let dataset_info = self.query.get_dataset(did).await.ok()?;
+                            self.cache.process_api_resource_update(
+                                ApiResource::Dataset(dataset_info),
+                                shared_id,
+                                persistent_res,
+                            )
                         }
                         ResourceVariant::Object => {
-                            let object_info = self
-                                .object_service
-                                .clone()
-                                .as_mut()?
-                                .get_object(Request::new(GetObjectRequest {
-                                    object_id: r.resource_id,
-                                }))
-                                .await
-                                .ok()?
-                                .into_inner();
-                            // Todo: Process collection,
+                            let oid = DieselUlid::from_str(&r.resource_id).ok()?;
+                            let object_info = self.query.get_object(oid).await.ok()?;
+                            self.cache.process_api_resource_update(
+                                ApiResource::Object(object_info),
+                                shared_id,
+                                persistent_res,
+                            )
                         }
                         _ => (),
                     }
@@ -307,7 +228,6 @@ impl NotificationCache {
             }
             _ => (),
         }
-
         event.reply
     }
 }

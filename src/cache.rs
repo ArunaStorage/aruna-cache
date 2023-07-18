@@ -1,18 +1,19 @@
-use std::str::FromStr;
-
 use crate::structs::PubKey;
 use crate::structs::{Resource, ResourcePermission};
 use ahash::RandomState;
 use anyhow::anyhow;
 use anyhow::Result;
 use aruna_rust_api::api::storage::models::v2::permission::ResourceId;
-use aruna_rust_api::api::storage::models::v2::ResourceVariant;
 use aruna_rust_api::api::storage::models::v2::{
     generic_resource::Resource as ApiResource, PermissionLevel,
 };
-use aruna_rust_api::api::storage::services::v2::{GetPubkeysResponse, GetUserRedactedResponse};
+use aruna_rust_api::api::storage::models::v2::{ResourceVariant, User};
+use aruna_rust_api::api::storage::services::v2::{
+    GetPubkeysResponse, GetUserRedactedResponse, Pubkey,
+};
 use dashmap::{DashMap, DashSet};
 use diesel_ulid::DieselUlid;
+use std::str::FromStr;
 
 #[derive(Debug)]
 pub struct Cache {
@@ -344,9 +345,9 @@ impl Cache {
         self.pubkeys.remove(&id);
     }
 
-    pub fn set_pubkeys(&self, pks: GetPubkeysResponse) {
+    pub fn set_pubkeys(&self, pks: Vec<Pubkey>) {
         self.pubkeys.clear();
-        for pk in pks.pubkeys {
+        for pk in pks {
             let split = pk.location.split("_").collect::<Vec<_>>();
             if split.contains(&"proxy") {
                 self.pubkeys.insert(
@@ -406,9 +407,9 @@ impl Cache {
         }
     }
 
-    pub fn parse_and_update_user_info(&self, uinfo: GetUserRedactedResponse) -> Option<()> {
-        let uid = DieselUlid::from_str(&uinfo.clone().user?.id).ok()?;
-        let user_attributes = uinfo.user?.attributes?;
+    pub fn parse_and_update_user_info(&self, uinfo: User) -> Option<()> {
+        let uid = DieselUlid::from_str(&uinfo.id).ok()?;
+        let user_attributes = uinfo.attributes?;
 
         self.remove_all_tokens_by_user(uid);
         let user_perm: DashMap<ResourcePermission, PermissionLevel, RandomState> =
@@ -495,6 +496,20 @@ impl Cache {
         }
 
         Some(())
+    }
+
+    pub fn process_api_resource_update(
+        &self,
+        res: ApiResource,
+        shared_id: DieselUlid,
+        persistent_resource: Resource,
+    ) {
+        match res {
+            ApiResource::Project(proj) => todo!(),
+            ApiResource::Collection(col) => todo!(),
+            ApiResource::Dataset(dset) => todo!(),
+            ApiResource::Object(obj) => todo!(),
+        }
     }
 }
 

@@ -78,6 +78,7 @@ dependencies = [
  "ahash",
  "anyhow",
  "aruna-rust-api",
+ "async-trait",
  "criterion",
  "dashmap",
  "diesel-ulid",

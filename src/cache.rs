@@ -528,7 +528,6 @@ impl Cache {
         Ok(())
     }
 
-
     fn check_updates(
         &self,
         old: &ApiResource,

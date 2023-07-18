@@ -162,40 +162,48 @@ impl NotificationCache {
                             let pid = DieselUlid::from_str(&r.resource_id).ok()?;
                             let project_info =
                                 self.query.get_project(pid, r.checksum).await.ok()?;
-                            self.cache.process_api_resource_update(
-                                ApiResource::Project(project_info),
-                                shared_id,
-                                persistent_res,
-                            ).ok()?
+                            self.cache
+                                .process_api_resource_update(
+                                    ApiResource::Project(project_info),
+                                    shared_id,
+                                    persistent_res,
+                                )
+                                .ok()?
                         }
                         ResourceVariant::Collection => {
                             let cid = DieselUlid::from_str(&r.resource_id).ok()?;
                             let collection_info =
                                 self.query.get_collection(cid, r.checksum).await.ok()?;
-                            self.cache.process_api_resource_update(
-                                ApiResource::Collection(collection_info),
-                                shared_id,
-                                persistent_res,
-                            ).ok()?
+                            self.cache
+                                .process_api_resource_update(
+                                    ApiResource::Collection(collection_info),
+                                    shared_id,
+                                    persistent_res,
+                                )
+                                .ok()?
                         }
                         ResourceVariant::Dataset => {
                             let did = DieselUlid::from_str(&r.resource_id).ok()?;
                             let dataset_info =
                                 self.query.get_dataset(did, r.checksum).await.ok()?;
-                            self.cache.process_api_resource_update(
-                                ApiResource::Dataset(dataset_info),
-                                shared_id,
-                                persistent_res,
-                            ).ok()?
+                            self.cache
+                                .process_api_resource_update(
+                                    ApiResource::Dataset(dataset_info),
+                                    shared_id,
+                                    persistent_res,
+                                )
+                                .ok()?
                         }
                         ResourceVariant::Object => {
                             let oid = DieselUlid::from_str(&r.resource_id).ok()?;
                             let object_info = self.query.get_object(oid, r.checksum).await.ok()?;
-                            self.cache.process_api_resource_update(
-                                ApiResource::Object(object_info),
-                                shared_id,
-                                persistent_res,
-                            ).ok()?
+                            self.cache
+                                .process_api_resource_update(
+                                    ApiResource::Object(object_info),
+                                    shared_id,
+                                    persistent_res,
+                                )
+                                .ok()?
                         }
                         _ => (),
                     }

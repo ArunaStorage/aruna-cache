@@ -1,13 +1,16 @@
 use crate::structs::PubKey;
 use crate::structs::{Resource, ResourcePermission};
-use ahash::RandomState;
+use crate::utils::internal_relation_to_rel;
+use ahash::{HashMap, HashSet, RandomState};
 use anyhow::anyhow;
 use anyhow::Result;
 use aruna_rust_api::api::storage::models::v2::permission::ResourceId;
 use aruna_rust_api::api::storage::models::v2::{
     generic_resource::Resource as ApiResource, PermissionLevel,
 };
-use aruna_rust_api::api::storage::models::v2::{ResourceVariant, User};
+use aruna_rust_api::api::storage::models::v2::{
+    relation, InternalRelationVariant, Relation, RelationDirection, ResourceVariant, User,
+};
 use aruna_rust_api::api::storage::services::v2::{
     GetPubkeysResponse, GetUserRedactedResponse, Pubkey,
 };
@@ -22,7 +25,7 @@ pub struct Cache {
     pub name_cache: DashMap<String, DashSet<Resource, RandomState>, RandomState>,
     pub shared_to_pid: DashMap<DieselUlid, Resource, RandomState>,
     pub pid_to_shared: DashMap<DieselUlid, Resource, RandomState>,
-    pub object_cache: DashMap<DieselUlid, ApiResource, RandomState>,
+    pub object_cache: DashMap<Resource, ApiResource, RandomState>,
     pub permissions:
         DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
     pub pubkeys: DashMap<i32, PubKey, RandomState>,
@@ -504,12 +507,113 @@ impl Cache {
         shared_id: DieselUlid,
         persistent_resource: Resource,
     ) {
-        match res {
-            ApiResource::Project(proj) => todo!(),
-            ApiResource::Collection(col) => todo!(),
-            ApiResource::Dataset(dset) => todo!(),
-            ApiResource::Object(obj) => todo!(),
+        if let Some(old) = self
+            .object_cache
+            .insert(persistent_resource.clone(), res.clone())
+        {
+            let (add_rel, remove_rel, name_update) =
+                self.check_updates(&old, &res, persistent_resource);
         }
+    }
+
+    fn check_updates(
+        &self,
+        old: &ApiResource,
+        new: &ApiResource,
+        res: Resource,
+    ) -> (
+        Vec<(Resource, Resource)>,
+        Vec<(Resource, Resource)>,
+        Option<(String, String)>,
+    ) {
+        let mut names = None;
+        let mut add_relation = Vec::new();
+        let mut remove_relation = Vec::new();
+
+        match (old, new) {
+            (ApiResource::Project(old_proj), ApiResource::Project(new_proj)) => {
+                if old_proj.name != new_proj.name {
+                    names = Some((old_proj.name.to_string(), new_proj.name.to_string()));
+                }
+                (add_relation, remove_relation) = self
+                    .process_relations(&old_proj.relations, &new_proj.relations, res)
+                    .unwrap_or_default();
+            }
+            (ApiResource::Collection(old_col), ApiResource::Collection(new_col)) => {
+                if old_col.name != new_col.name {
+                    names = Some((old_col.name.to_string(), new_col.name.to_string()));
+                }
+                (add_relation, remove_relation) = self
+                    .process_relations(&old_col.relations, &new_col.relations, res)
+                    .unwrap_or_default();
+            }
+            (ApiResource::Dataset(old_ds), ApiResource::Dataset(new_ds)) => {
+                if old_ds.name != new_ds.name {
+                    names = Some((old_ds.name.to_string(), new_ds.name.to_string()));
+                }
+                (add_relation, remove_relation) = self
+                    .process_relations(&old_ds.relations, &new_ds.relations, res)
+                    .unwrap_or_default();
+            }
+            (ApiResource::Object(old_obj), ApiResource::Object(new_obj)) => {
+                if old_obj.name != new_obj.name {
+                    names = Some((old_obj.name.to_string(), new_obj.name.to_string()));
+                }
+                (add_relation, remove_relation) = self
+                    .process_relations(&old_obj.relations, &new_obj.relations, res)
+                    .unwrap_or_default();
+            }
+            _ => (),
+        }
+        (add_relation, remove_relation, names)
+    }
+
+    fn process_relations(
+        &self,
+        old: &Vec<Relation>,
+        new: &Vec<Relation>,
+        origin: Resource,
+    ) -> Result<(Vec<(Resource, Resource)>, Vec<(Resource, Resource)>)> {
+        let mut new_rel = HashMap::default();
+        let mut remove = Vec::new();
+
+        for nrel in new {
+            if let Some(irel) = &nrel.relation {
+                if let relation::Relation::Internal(int) = irel {
+                    if int.defined_variant() == InternalRelationVariant::BelongsTo {
+                        let (from, to) = internal_relation_to_rel(origin.clone(), int.clone())?;
+                        new_rel.insert(from, to);
+                    }
+                }
+            }
+        }
+
+        for orel in old {
+            if let Some(irel) = &orel.relation {
+                if let relation::Relation::Internal(int) = irel {
+                    if int.defined_variant() == InternalRelationVariant::BelongsTo {
+                        let (from, to) = internal_relation_to_rel(origin.clone(), int.clone())?;
+
+                        let new_rel_hit = new_rel.get(&from);
+                        match new_rel_hit {
+                            // If a new relation matches up an old one
+                            Some(new_val) => {
+                                // If both relations dont match up -> Relation change
+                                if new_val != &to {
+                                    remove.push((from, to))
+                                // Relations match up nothing must be done
+                                } else {
+                                    new_rel.remove(&from);
+                                }
+                            }
+                            // If no relation match up remove old one
+                            None => remove.push((from, to)),
+                        }
+                    }
+                }
+            }
+        }
+        Ok((Vec::from_iter(new_rel.into_iter()), remove))
     }
 }
 

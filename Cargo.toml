@@ -13,7 +13,7 @@ anyhow = "1.0.72"
 dashmap = "5.5.0"
 diesel-ulid = "0.2.0"
 ahash = "0.8.3"
-aruna-rust-api = "2.0.0-alpha.5"
+aruna-rust-api = "2.0.0-alpha.7"
 tokio = {version = "1.29.1", features = ["full"]}
 tonic = {version = "0.9.2", features = ["tls"]}
 async-trait = "0.1.71"

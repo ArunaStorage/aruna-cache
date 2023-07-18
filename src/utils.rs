@@ -1,6 +1,9 @@
 use crate::structs::Resource;
+use anyhow::anyhow;
+use anyhow::Result;
 use aruna_rust_api::api::{
-    notification::services::v2::Resource as ApiResource, storage::models::v2::ResourceVariant,
+    notification::services::v2::Resource as ApiResource,
+    storage::models::v2::{InternalRelation, RelationDirection, ResourceVariant},
 };
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
@@ -31,5 +34,52 @@ impl GetRef for ApiResource {
         };
 
         Some((associated_id, res))
+    }
+}
+
+pub fn internal_relation_to_rel(
+    id: Resource,
+    int_rel: InternalRelation,
+) -> Result<(Resource, Resource)> {
+    match int_rel.direction() {
+        RelationDirection::Inbound => match int_rel.resource_variant() {
+            ResourceVariant::Project => Ok((
+                Resource::Project(DieselUlid::from_str(&int_rel.resource_id)?),
+                id,
+            )),
+            ResourceVariant::Collection => Ok((
+                Resource::Collection(DieselUlid::from_str(&int_rel.resource_id)?),
+                id,
+            )),
+            ResourceVariant::Dataset => Ok((
+                Resource::Dataset(DieselUlid::from_str(&int_rel.resource_id)?),
+                id,
+            )),
+            ResourceVariant::Object => Ok((
+                Resource::Object(DieselUlid::from_str(&int_rel.resource_id)?),
+                id,
+            )),
+            _ => Err(anyhow!("Invalid resource variant")),
+        },
+        RelationDirection::Outbound => match int_rel.resource_variant() {
+            ResourceVariant::Project => Ok((
+                id,
+                Resource::Project(DieselUlid::from_str(&int_rel.resource_id)?),
+            )),
+            ResourceVariant::Collection => Ok((
+                id,
+                Resource::Collection(DieselUlid::from_str(&int_rel.resource_id)?),
+            )),
+            ResourceVariant::Dataset => Ok((
+                id,
+                Resource::Dataset(DieselUlid::from_str(&int_rel.resource_id)?),
+            )),
+            ResourceVariant::Object => Ok((
+                id,
+                Resource::Object(DieselUlid::from_str(&int_rel.resource_id)?),
+            )),
+            _ => Err(anyhow!("Invalid resource variant")),
+        },
+        _ => Err(anyhow!("Invalid resource variant")),
     }
 }

@@ -239,35 +239,18 @@ impl NotificationCache {
 
     async fn process_resource_event(&self, event: ResourceEvent) -> Option<Reply> {
         match event.event_variant() {
-            EventVariant::Created => {
+            EventVariant::Created | EventVariant::Updated => {
                 if let Some(r) = event.resource {
                     let (associated_id, res) = r.get_ref()?;
-                    if let Some(ctx) = event.context {
-                        if let Some(Event::RelationUpdates(new_relations)) = ctx.event {
-                            self.process_relation_update(res.clone(), new_relations)?;
-                        }
+                    match r.resource_variant() {
+                        ResourceVariant::Project => todo!(),
+                        ResourceVariant::Collection => todo!(),
+                        ResourceVariant::Dataset => todo!(),
+                        ResourceVariant::Object => todo!(),
+                        _ => (),
                     }
                     self.cache.add_shared(associated_id, res.get_id());
                     self.cache.add_name(res, r.resource_name);
-                }
-            }
-            EventVariant::Updated => {
-                if let Some(r) = event.resource {
-                    let (_associated_id, res) = r.get_ref()?;
-                    if let Some(ctx) = event.context {
-                        match ctx.event? {
-                            Event::RelationUpdates(new_relations) => {
-                                self.process_relation_update(res, new_relations)?;
-                            }
-                            Event::UpdatedFields(fields) => {
-                                if fields.updated_fields.contains(&String::from("name")) {
-                                    self.cache.remove_name(res.clone(), None);
-                                    self.cache.add_name(res, r.resource_name)
-                                }
-                            }
-                            _ => (),
-                        }
-                    }
                 }
             }
             EventVariant::Deleted => {

@@ -6,6 +6,7 @@ use ahash::RandomState;
 use anyhow::anyhow;
 use anyhow::Result;
 use aruna_rust_api::api::storage::models::v2::permission::ResourceId;
+use aruna_rust_api::api::storage::models::v2::ResourceVariant;
 use aruna_rust_api::api::storage::models::v2::{
     generic_resource::Resource as ApiResource, PermissionLevel,
 };
@@ -18,7 +19,8 @@ pub struct Cache {
     // Graph cache contains From -> [all]
     pub graph_cache: DashMap<Resource, DashSet<Resource, RandomState>, RandomState>,
     pub name_cache: DashMap<String, DashSet<Resource, RandomState>, RandomState>,
-    pub shared_id_cache: DashMap<DieselUlid, DieselUlid, RandomState>,
+    pub shared_to_pid: DashMap<DieselUlid, Resource, RandomState>,
+    pub pid_to_shared: DashMap<DieselUlid, Resource, RandomState>,
     pub object_cache: DashMap<DieselUlid, ApiResource, RandomState>,
     pub permissions:
         DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
@@ -38,7 +40,8 @@ impl Cache {
         Cache {
             graph_cache: DashMap::with_hasher(RandomState::new()),
             name_cache: DashMap::with_hasher(RandomState::new()),
-            shared_id_cache: DashMap::with_hasher(RandomState::new()),
+            shared_to_pid: DashMap::with_hasher(RandomState::new()),
+            pid_to_shared: DashMap::with_hasher(RandomState::new()),
             object_cache: DashMap::with_hasher(RandomState::new()),
             permissions: DashMap::with_hasher(RandomState::new()),
             pubkeys: DashMap::with_hasher(RandomState::new()),
@@ -235,21 +238,66 @@ impl Cache {
     // Shared id cache functions !
 
     // Exchanges Shared -> Persistent or vice-versa
-    pub fn get_associated_id(&self, input: &DieselUlid) -> Option<DieselUlid> {
-        self.shared_id_cache.get(input).map(|e| *e)
-    }
-
-    pub fn add_shared(&self, shared: DieselUlid, persistent: DieselUlid) {
-        self.shared_id_cache.insert(shared, persistent);
-        self.shared_id_cache.insert(persistent, shared);
-    }
-
-    pub fn update_shared(&self, shared: DieselUlid, new_persistent: DieselUlid) {
-        let old = self.shared_id_cache.insert(shared, new_persistent);
-        if let Some(o) = old {
-            self.shared_id_cache.remove(&o);
+    pub fn add_or_update_shared(
+        &self,
+        shared: DieselUlid,
+        persistent: DieselUlid,
+        variant: ResourceVariant,
+    ) -> Result<()> {
+        match variant {
+            ResourceVariant::Project => {
+                if let Some(exists) = self
+                    .shared_to_pid
+                    .insert(shared, Resource::Project(persistent))
+                {
+                    self.pid_to_shared.remove(&exists.get_id());
+                }
+                self.pid_to_shared
+                    .insert(persistent, Resource::Project(shared));
+            }
+            ResourceVariant::Collection => {
+                if let Some(exists) = self
+                    .shared_to_pid
+                    .insert(shared, Resource::Collection(persistent))
+                {
+                    self.pid_to_shared.remove(&exists.get_id());
+                }
+                self.pid_to_shared
+                    .insert(persistent, Resource::Collection(shared));
+            }
+            ResourceVariant::Dataset => {
+                if let Some(exists) = self
+                    .shared_to_pid
+                    .insert(shared, Resource::Dataset(persistent))
+                {
+                    self.pid_to_shared.remove(&exists.get_id());
+                }
+                self.pid_to_shared
+                    .insert(persistent, Resource::Dataset(shared));
+            }
+            ResourceVariant::Object => {
+                if let Some(exists) = self
+                    .shared_to_pid
+                    .insert(shared, Resource::Object(persistent))
+                {
+                    self.pid_to_shared.remove(&exists.get_id());
+                }
+                self.pid_to_shared
+                    .insert(persistent, Resource::Object(shared));
+            }
+            _ => return Err(anyhow!("Invalid variant")),
         }
-        self.shared_id_cache.insert(new_persistent, shared);
+        Ok(())
+    }
+
+    pub fn get_persistent(&self, shared: &DieselUlid) -> Option<Resource> {
+        self.shared_to_pid.get(shared).map(|e| e.value().clone())
+    }
+
+    pub fn get_shared(&self, persistent: &DieselUlid) -> Option<Resource> {
+        self.pid_to_shared
+            .get(persistent)
+            .map(|e| e.value().clone())
     }
 
     pub fn add_or_update_permission(
@@ -463,7 +511,8 @@ mod tests {
         let cache2 = Cache {
             graph_cache: DashMap::with_hasher(RandomState::new()),
             name_cache: DashMap::with_hasher(RandomState::new()),
-            shared_id_cache: DashMap::with_hasher(RandomState::new()),
+            shared_to_pid: DashMap::with_hasher(RandomState::new()),
+            pid_to_shared: DashMap::with_hasher(RandomState::new()),
             object_cache: DashMap::with_hasher(RandomState::new()),
             permissions: DashMap::with_hasher(RandomState::new()),
             pubkeys: DashMap::with_hasher(RandomState::new()),
@@ -490,16 +539,32 @@ mod tests {
         let persistent_1 = DieselUlid::generate();
         let persistent_2 = DieselUlid::generate();
 
-        cache.add_shared(shared_1, persistent_1);
+        cache.add_or_update_shared(shared_1, persistent_1, ResourceVariant::Project);
 
-        assert_eq!(cache.get_associated_id(&shared_1).unwrap(), persistent_1);
-        assert_eq!(cache.get_associated_id(&persistent_1).unwrap(), shared_1);
-        assert_eq!(cache.shared_id_cache.len(), 2);
+        assert_eq!(
+            cache.get_shared(&persistent_1).unwrap(),
+            Resource::Project(shared_1)
+        );
 
-        cache.update_shared(shared_1, persistent_2);
-        assert_eq!(cache.get_associated_id(&shared_1).unwrap(), persistent_2);
-        assert_eq!(cache.get_associated_id(&persistent_2).unwrap(), shared_1);
-        assert_eq!(cache.shared_id_cache.len(), 2);
+        assert_eq!(
+            cache.get_persistent(&shared_1).unwrap(),
+            Resource::Project(persistent_1)
+        );
+
+        cache.add_or_update_shared(shared_1, persistent_2, ResourceVariant::Project);
+
+        assert_eq!(
+            cache.get_shared(&persistent_2).unwrap(),
+            Resource::Project(shared_1)
+        );
+
+        assert_eq!(
+            cache.get_persistent(&shared_1).unwrap(),
+            Resource::Project(persistent_2)
+        );
+
+        assert!(cache.shared_to_pid.len() == 1);
+        assert!(cache.pid_to_shared.len() == 1);
     }
 
     #[test]
@@ -688,29 +753,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_associated_id() {
-        let cache = Cache::new();
-        let shared_id = DieselUlid::generate();
-        let persistent_id = DieselUlid::generate();
-
-        // Add an entry to the shared id cache
-        cache.add_shared(shared_id.clone(), persistent_id.clone());
-
-        // Test getting the associated persistent id
-        let result = cache.get_associated_id(&shared_id);
-        assert_eq!(result, Some(persistent_id));
-
-        // Test getting the associated shared id
-        let result = cache.get_associated_id(&persistent_id);
-        assert_eq!(result, Some(shared_id));
-
-        // Test getting an associated id that doesn't exist
-        let invalid_id = DieselUlid::generate();
-        let result = cache.get_associated_id(&invalid_id);
-        assert_eq!(result, None);
-    }
-
-    #[test]
     fn test_add_or_update_permission() {
         let cache = Cache::new();
         let resource_id = DieselUlid::generate();
@@ -836,23 +878,6 @@ mod tests {
         assert!(cache.pubkeys.contains_key(&1));
 
         assert_eq!(cache.get_pubkeys().len(), 1);
-    }
-
-    #[test]
-    fn test_update_shared() {
-        let cache = Cache::new();
-        let shared_id = DieselUlid::generate();
-        let new_persistent_id = DieselUlid::generate();
-
-        // Test updating a shared id
-        cache.update_shared(shared_id.clone(), new_persistent_id.clone());
-
-        // Check if the shared id is updated
-        cache.shared_id_cache.get(&shared_id);
-
-        // Check if the new persistent id is associated with the shared id
-        let result = cache.get_associated_id(&shared_id);
-        assert_eq!(result, Some(new_persistent_id));
     }
 
     #[test]

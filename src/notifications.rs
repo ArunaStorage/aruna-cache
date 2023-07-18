@@ -79,13 +79,13 @@ impl NotificationCache {
         })
     }
 
-    pub async fn create_notifications_channel(&mut self, streamgroup: String) -> Result<()> {
+    pub async fn create_notifications_channel(&mut self, stream_consumer: String) -> Result<()> {
         let stream = self
             .notification_service
             .as_mut()
             .ok_or_else(|| anyhow!("Missing notification client"))?
             .get_event_message_batch_stream(Request::new(GetEventMessageBatchStreamRequest {
-                stream_group_id: streamgroup,
+                stream_consumer,
                 batch_size: 10,
             }))
             .await?;
@@ -139,7 +139,7 @@ impl NotificationCache {
         match message.event_variant() {
             EventVariant::Created | EventVariant::Available | EventVariant::Updated => {
                 let uid = DieselUlid::from_str(&message.user_id).ok()?;
-                let user_info = self.query.get_user(uid).await.ok()?;
+                let user_info = self.query.get_user(uid, message.checksum).await.ok()?;
                 self.cache.parse_and_update_user_info(user_info)?;
             }
             EventVariant::Deleted => {
@@ -160,7 +160,8 @@ impl NotificationCache {
                     match r.resource_variant() {
                         ResourceVariant::Project => {
                             let pid = DieselUlid::from_str(&r.resource_id).ok()?;
-                            let project_info = self.query.get_project(pid).await.ok()?;
+                            let project_info =
+                                self.query.get_project(pid, r.checksum).await.ok()?;
                             self.cache.process_api_resource_update(
                                 ApiResource::Project(project_info),
                                 shared_id,
@@ -169,7 +170,8 @@ impl NotificationCache {
                         }
                         ResourceVariant::Collection => {
                             let cid = DieselUlid::from_str(&r.resource_id).ok()?;
-                            let collection_info = self.query.get_collection(cid).await.ok()?;
+                            let collection_info =
+                                self.query.get_collection(cid, r.checksum).await.ok()?;
                             self.cache.process_api_resource_update(
                                 ApiResource::Collection(collection_info),
                                 shared_id,
@@ -178,7 +180,8 @@ impl NotificationCache {
                         }
                         ResourceVariant::Dataset => {
                             let did = DieselUlid::from_str(&r.resource_id).ok()?;
-                            let dataset_info = self.query.get_dataset(did).await.ok()?;
+                            let dataset_info =
+                                self.query.get_dataset(did, r.checksum).await.ok()?;
                             self.cache.process_api_resource_update(
                                 ApiResource::Dataset(dataset_info),
                                 shared_id,
@@ -187,7 +190,7 @@ impl NotificationCache {
                         }
                         ResourceVariant::Object => {
                             let oid = DieselUlid::from_str(&r.resource_id).ok()?;
-                            let object_info = self.query.get_object(oid).await.ok()?;
+                            let object_info = self.query.get_object(oid, r.checksum).await.ok()?;
                             self.cache.process_api_resource_update(
                                 ApiResource::Object(object_info),
                                 shared_id,

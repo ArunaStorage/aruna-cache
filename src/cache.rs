@@ -1,7 +1,7 @@
 use crate::structs::PubKey;
 use crate::structs::{Resource, ResourcePermission};
 use crate::utils::internal_relation_to_rel;
-use ahash::{HashMap, HashSet, RandomState};
+use ahash::{HashMap, RandomState};
 use anyhow::anyhow;
 use anyhow::Result;
 use aruna_rust_api::api::storage::models::v2::permission::ResourceId;
@@ -9,11 +9,9 @@ use aruna_rust_api::api::storage::models::v2::{
     generic_resource::Resource as ApiResource, PermissionLevel,
 };
 use aruna_rust_api::api::storage::models::v2::{
-    relation, InternalRelationVariant, Relation, RelationDirection, ResourceVariant, User,
+    relation, InternalRelationVariant, Relation, ResourceVariant, User,
 };
-use aruna_rust_api::api::storage::services::v2::{
-    GetPubkeysResponse, GetUserRedactedResponse, Pubkey,
-};
+use aruna_rust_api::api::storage::services::v2::Pubkey;
 use dashmap::{DashMap, DashSet};
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
@@ -351,7 +349,7 @@ impl Cache {
     pub fn set_pubkeys(&self, pks: Vec<Pubkey>) {
         self.pubkeys.clear();
         for pk in pks {
-            let split = pk.location.split("_").collect::<Vec<_>>();
+            let split = pk.location.split('_').collect::<Vec<_>>();
             if split.contains(&"proxy") {
                 self.pubkeys.insert(
                     pk.id,
@@ -397,7 +395,7 @@ impl Cache {
     }
 
     pub fn get_user_by_token(&self, token_id: DieselUlid) -> Option<DieselUlid> {
-        self.token_ids.get(&token_id).map(|e| e.value().clone())
+        self.token_ids.get(&token_id).map(|e| *e.value())
     }
 
     pub fn remove_all_tokens_by_user(&self, user_id: DieselUlid) {
@@ -504,14 +502,14 @@ impl Cache {
     pub fn process_api_resource_update(
         &self,
         res: ApiResource,
-        shared_id: DieselUlid,
+        _shared_id: DieselUlid,
         persistent_resource: Resource,
     ) {
         if let Some(old) = self
             .object_cache
             .insert(persistent_resource.clone(), res.clone())
         {
-            let (add_rel, remove_rel, name_update) =
+            let (_add_rel, _remove_rel, _name_update) =
                 self.check_updates(&old, &res, persistent_resource);
         }
     }
@@ -578,42 +576,38 @@ impl Cache {
         let mut remove = Vec::new();
 
         for nrel in new {
-            if let Some(irel) = &nrel.relation {
-                if let relation::Relation::Internal(int) = irel {
-                    if int.defined_variant() == InternalRelationVariant::BelongsTo {
-                        let (from, to) = internal_relation_to_rel(origin.clone(), int.clone())?;
-                        new_rel.insert(from, to);
-                    }
+            if let Some(relation::Relation::Internal(int)) = &nrel.relation {
+                if int.defined_variant() == InternalRelationVariant::BelongsTo {
+                    let (from, to) = internal_relation_to_rel(origin.clone(), int.clone())?;
+                    new_rel.insert(from, to);
                 }
             }
         }
 
         for orel in old {
-            if let Some(irel) = &orel.relation {
-                if let relation::Relation::Internal(int) = irel {
-                    if int.defined_variant() == InternalRelationVariant::BelongsTo {
-                        let (from, to) = internal_relation_to_rel(origin.clone(), int.clone())?;
+            if let Some(relation::Relation::Internal(int)) = &orel.relation {
+                if int.defined_variant() == InternalRelationVariant::BelongsTo {
+                    let (from, to) = internal_relation_to_rel(origin.clone(), int.clone())?;
 
-                        let new_rel_hit = new_rel.get(&from);
-                        match new_rel_hit {
-                            // If a new relation matches up an old one
-                            Some(new_val) => {
-                                // If both relations dont match up -> Relation change
-                                if new_val != &to {
-                                    remove.push((from, to))
-                                // Relations match up nothing must be done
-                                } else {
-                                    new_rel.remove(&from);
-                                }
+                    let new_rel_hit = new_rel.get(&from);
+                    match new_rel_hit {
+                        // If a new relation matches up an old one
+                        Some(new_val) => {
+                            // If both relations dont match up -> Relation change
+                            if new_val != &to {
+                                remove.push((from, to))
+                            // Relations match up nothing must be done
+                            } else {
+                                new_rel.remove(&from);
                             }
-                            // If no relation match up remove old one
-                            None => remove.push((from, to)),
                         }
+                        // If no relation match up remove old one
+                        None => remove.push((from, to)),
                     }
                 }
             }
         }
-        Ok((Vec::from_iter(new_rel.into_iter()), remove))
+        Ok((Vec::from_iter(new_rel), remove))
     }
 }
 
@@ -884,7 +878,7 @@ mod tests {
         );
 
         // Test adding a permission
-        cache.add_or_update_permission(resource_id.clone(), permission.clone());
+        cache.add_or_update_permission(resource_id, permission.clone());
 
         // Check if the permission is added
         let result = cache
@@ -897,7 +891,7 @@ mod tests {
 
         // Test updating a permission
         let updated_permission = (ResourcePermission::GlobalAdmin, PermissionLevel::Write);
-        cache.add_or_update_permission(resource_id.clone(), updated_permission.clone());
+        cache.add_or_update_permission(resource_id, updated_permission.clone());
 
         // Check if the permission is updated
         let result = cache
@@ -919,10 +913,10 @@ mod tests {
         );
 
         // Add a permission to the cache
-        cache.add_or_update_permission(resource_id.clone(), permission.clone());
+        cache.add_or_update_permission(resource_id, permission.clone());
 
         // Test removing a specific permission
-        cache.remove_permission(resource_id.clone(), Some(permission.0), true);
+        cache.remove_permission(resource_id, Some(permission.0), true);
 
         // Check if the permission is removed for the specific resource
         assert!(!cache.permissions.contains_key(&resource_id));
@@ -931,8 +925,8 @@ mod tests {
             ResourcePermission::Resource(Resource::Project(DieselUlid::generate())),
             PermissionLevel::Read,
         );
-        cache.add_or_update_permission(resource_id.clone(), permission.clone());
-        cache.remove_permission(resource_id.clone(), Some(permission.0), false);
+        cache.add_or_update_permission(resource_id, permission.clone());
+        cache.remove_permission(resource_id, Some(permission.0), false);
         assert!(cache.permissions.get(&resource_id).unwrap().is_empty());
     }
 
@@ -947,8 +941,8 @@ mod tests {
         let permission_2 = (ResourcePermission::GlobalAdmin, PermissionLevel::Write);
 
         // Add permissions to the cache
-        cache.add_or_update_permission(resource_id.clone(), permission_1.clone());
-        cache.add_or_update_permission(resource_id.clone(), permission_2.clone());
+        cache.add_or_update_permission(resource_id, permission_1.clone());
+        cache.add_or_update_permission(resource_id, permission_2.clone());
 
         // Test getting permissions
         let result = cache

@@ -6,12 +6,12 @@ use diesel_ulid::DieselUlid;
 
 #[async_trait]
 pub trait QueryHandler {
-    async fn get_user(&self, id: DieselUlid) -> Result<User>;
+    async fn get_user(&self, id: DieselUlid, checksum: String) -> Result<User>;
     async fn get_pubkeys(&self) -> Result<Vec<APIPubkey>>;
-    async fn get_project(&self, id: DieselUlid) -> Result<Project>;
-    async fn get_collection(&self, id: DieselUlid) -> Result<Collection>;
-    async fn get_dataset(&self, id: DieselUlid) -> Result<Dataset>;
-    async fn get_object(&self, id: DieselUlid) -> Result<Object>;
+    async fn get_project(&self, id: DieselUlid, checksum: String) -> Result<Project>;
+    async fn get_collection(&self, id: DieselUlid, checksum: String) -> Result<Collection>;
+    async fn get_dataset(&self, id: DieselUlid, checksum: String) -> Result<Dataset>;
+    async fn get_object(&self, id: DieselUlid, checksum: String) -> Result<Object>;
 }
 
 // project_service: Option<ProjectServiceClient<InterceptedService<Channel, ClientInterceptor>>>,

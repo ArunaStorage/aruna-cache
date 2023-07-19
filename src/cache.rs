@@ -27,7 +27,7 @@ pub struct Cache {
     pub permissions:
         DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
     pub pubkeys: DashMap<i32, PubKey, RandomState>,
-    pub oidc_ids: DashMap<String, DieselUlid, RandomState>,
+    pub oidc_ids: DashMap<String, (DieselUlid, String), RandomState>,
     pub token_ids: DashMap<DieselUlid, DieselUlid, RandomState>,
 }
 
@@ -372,8 +372,8 @@ impl Cache {
             .collect()
     }
 
-    pub fn add_oidc(&self, oidc_id: String, user_id: DieselUlid) {
-        self.oidc_ids.insert(oidc_id, user_id);
+    pub fn add_oidc(&self, oidc_id: String, user_id: DieselUlid, url: String) {
+        self.oidc_ids.insert(oidc_id, (user_id, url));
     }
     pub fn remove_oidc(&self, oidc_id: &str) {
         self.oidc_ids.remove(oidc_id);
@@ -382,7 +382,7 @@ impl Cache {
         &self,
         oidc_id: &str,
     ) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
-        let ulid = self.oidc_ids.get(oidc_id)?;
+        let ulid = self.oidc_ids.get(oidc_id)?.0;
         self.get_permissions(&ulid)
     }
 
@@ -422,6 +422,10 @@ impl Cache {
 
         if user_attributes.service_account {
             user_perm.insert(ResourcePermission::ServiceAccount, PermissionLevel::None);
+        }
+
+        for ext_id in uinfo.external_ids {
+            self.oidc_ids.insert(ext_id.external_id, (uid, ext_id.idp));
         }
 
         for p in user_attributes.personal_permissions {
@@ -531,6 +535,7 @@ impl Cache {
             persistent_resource.get_id(),
             persistent_resource.update_id(shared_id),
         );
+        self.object_cache.insert(persistent_resource, res);
         Ok(())
     }
 
@@ -1078,7 +1083,7 @@ mod tests {
         let name = "a_name".to_string();
         let id = DieselUlid::generate();
 
-        cache.add_oidc(name.clone(), id);
+        cache.add_oidc(name.clone(), id, "test.test".to_string());
 
         assert!(cache.get_user_perm_by_oidc(&name).is_none());
 

@@ -48,7 +48,6 @@ impl tonic::service::Interceptor for ClientInterceptor {
 pub struct NotificationCache {
     notification_service:
         Option<EventNotificationServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
-
     query: Box<dyn QueryHandler>,
     pub cache: Cache,
 }

@@ -54,11 +54,15 @@ pub struct ApiQueryHandler {
     _endpoint_service: EndpointServiceClient<InterceptedService<Channel, ClientInterceptor>>,
     storage_status_service:
         StorageStatusServiceClient<InterceptedService<Channel, ClientInterceptor>>,
-    _persistence: Option<Box<dyn PersistenceHandler + Send + Sync>>,
+    persistence: Option<Box<dyn PersistenceHandler + Send + Sync>>,
 }
 
 impl ApiQueryHandler {
-    async fn new(token: impl Into<String>, server: impl Into<String>) -> Result<Self> {
+    async fn new(
+        token: impl Into<String>,
+        server: impl Into<String>,
+        persistence: Option<Box<dyn PersistenceHandler + Send + Sync>>,
+    ) -> Result<Self> {
         let tls_config = ClientTlsConfig::new();
         let endpoint = Channel::from_shared(server.into())?.tls_config(tls_config)?;
         let channel = endpoint.connect().await?;
@@ -110,7 +114,7 @@ impl ApiQueryHandler {
             user_service,
             _endpoint_service,
             storage_status_service,
-            _persistence: None, // TODO: FOR now, add persistence later
+            persistence,
         })
     }
 }

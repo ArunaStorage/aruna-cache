@@ -1,5 +1,6 @@
+use crate::checksum::{checksum_resource, checksum_user};
 use crate::persistence::{self, Persistence};
-use crate::utils::{checksum_resource, checksum_user, ClientInterceptor};
+use crate::utils::ClientInterceptor;
 use anyhow::anyhow;
 use anyhow::Result;
 use aruna_rust_api::api::storage::models::v2::{

@@ -1,5 +1,5 @@
 use crate::checksum::{checksum_resource, checksum_user};
-use crate::persistence::{self, Persistence};
+use crate::persistence::PersistenceHandler;
 use crate::utils::ClientInterceptor;
 use anyhow::anyhow;
 use anyhow::Result;
@@ -54,7 +54,7 @@ pub struct ApiQueryHandler {
     _endpoint_service: EndpointServiceClient<InterceptedService<Channel, ClientInterceptor>>,
     storage_status_service:
         StorageStatusServiceClient<InterceptedService<Channel, ClientInterceptor>>,
-    _persistence: Option<Persistence>,
+    _persistence: Option<Box<dyn PersistenceHandler + Send + Sync>>,
 }
 
 impl ApiQueryHandler {
@@ -65,8 +65,6 @@ impl ApiQueryHandler {
         let interceptor = ClientInterceptor {
             api_token: token.into(),
         };
-
-        let _persistence = persistence::Persistence {};
 
         let project_service = project_service_client::ProjectServiceClient::with_interceptor(
             channel.clone(),

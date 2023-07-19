@@ -502,7 +502,7 @@ impl Cache {
     pub fn process_api_resource_update(
         &self,
         res: ApiResource,
-        _shared_id: DieselUlid,
+        shared_id: DieselUlid,
         persistent_resource: Resource,
     ) -> Result<()> {
         if let Some(old) = self
@@ -525,6 +525,12 @@ impl Cache {
                 self.add_link(from, to)?;
             }
         }
+        self.shared_to_pid
+            .insert(shared_id, persistent_resource.clone());
+        self.pid_to_shared.insert(
+            persistent_resource.get_id(),
+            persistent_resource.update_id(shared_id),
+        );
         Ok(())
     }
 

@@ -32,6 +32,14 @@ impl Resource {
             Resource::Object(i) => *i,
         }
     }
+    pub fn update_id(&self, new_id: DieselUlid) -> Resource {
+        match self {
+            Resource::Project(_) => Resource::Project(new_id),
+            Resource::Collection(_) => Resource::Collection(new_id),
+            Resource::Dataset(_) => Resource::Dataset(new_id),
+            Resource::Object(_) => Resource::Object(new_id),
+        }
+    }
 }
 
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Hash, Clone)]

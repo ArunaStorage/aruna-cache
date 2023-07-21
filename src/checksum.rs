@@ -34,3 +34,24 @@ pub fn checksum_user(user: &User) -> Result<String> {
         .encode(xxh3_128(&bincode::serialize(user)?).to_be_bytes())
         .to_string())
 }
+
+// #[cfg(test)]
+// mod tests {
+//     use super::*;
+//     use aruna_rust_api::api::storage::models::v2::{generic_resource, Project, User};
+//     use diesel_ulid::DieselUlid;
+
+//     #[test]
+//     fn checksum_user_test() {
+//         let user = User {
+//             id: DieselUlid::generate().to_string(),
+//             external_ids: todo!(),
+//             display_name: todo!(),
+//             active: todo!(),
+//             email: todo!(),
+//             attributes: todo!(),
+//         };
+
+//         let checksum = checksum_user(&user).unwrap();
+//     }
+// }

@@ -1,9 +1,8 @@
-use std::time::Duration;
-
 use aruna_cache::cache::Cache;
 use aruna_cache::structs::Resource::*;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use diesel_ulid::DieselUlid;
+use std::time::Duration;
 
 async fn test_cache() {
     todo!()

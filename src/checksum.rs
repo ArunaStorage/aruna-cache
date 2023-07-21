@@ -3,7 +3,7 @@ use aruna_rust_api::api::storage::models::v2::{generic_resource, User};
 use base64::{engine::general_purpose, Engine};
 use xxhash_rust::xxh3::xxh3_128;
 
-pub fn checksum_resource(gen_res: generic_resource::Resource) -> Result<String> {
+pub fn checksum_resource(gen_res: &generic_resource::Resource) -> Result<String> {
     match gen_res {
         generic_resource::Resource::Project(mut proj) => {
             proj.stats = None;

@@ -330,13 +330,15 @@ impl Cache {
             .collect()
     }
 
-    fn add_oidc(&self, oidc_id: String, user_id: DieselUlid) {
+    fn add_or_update_oidc(&self, oidc_id: String, user_id: DieselUlid) {
         self.oidc_ids.insert(oidc_id, user_id);
     }
 
     pub fn add_or_update_user(&self, user: User) -> Result<()> {
-        self.user_cache
-            .insert(DieselUlid::from_str(&user.id)?, user);
+        let uid = DieselUlid::from_str(&user.id)?;
+        let ext_id = user.external_ids.first().unwrap().external_id.clone();
+        self.user_cache.insert(uid, user);
+        self.add_or_update_oidc(ext_id, uid);
         Ok(())
     }
 
@@ -347,12 +349,21 @@ impl Cache {
             .map(|e| e.value().clone())
     }
 
+    pub fn get_user(&self, user_id: DieselUlid) -> Option<User> {
+        self.user_cache.get(&user_id).map(|e| e.value().clone())
+    }
+
     pub fn remove_user(&self, user_id: &DieselUlid) {
         self.user_cache.remove(user_id);
     }
 
     pub fn remove_resource(&self, persistent_resource: Resource, shared_id: DieselUlid) {
-        todo!()
+        self.object_cache.remove(&persistent_resource);
+        self.remove_name(persistent_resource, None);
+        let pid = self.shared_to_pid.get(&shared_id);
+        if let Some(pi) = pid {
+            self.pid_to_shared.remove(&pi.value().get_id());
+        }
     }
 
     pub fn process_api_resource_update(
@@ -562,7 +573,7 @@ mod tests {
 
         let project_id = DieselUlid::generate();
 
-        let (id, user) = generate_user(
+        let (_id, user) = generate_user(
             None,
             vec![Permission {
                 permission_level: 1,

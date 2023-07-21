@@ -37,9 +37,9 @@ use tonic::Request;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FullSyncData {
-    resources: Vec<(DieselUlid, Resource, generic_resource::Resource)>,
-    users: Vec<(DieselUlid, User)>,
-    pubkeys: Vec<APIPubkey>,
+    pub resources: Vec<(DieselUlid, Resource, generic_resource::Resource)>,
+    pub users: Vec<(DieselUlid, User)>,
+    pub pubkeys: Vec<APIPubkey>,
 }
 
 #[async_trait]

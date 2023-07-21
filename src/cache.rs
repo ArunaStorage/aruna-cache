@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use crate::query::FullSyncData;
 use crate::structs::PubKey;
 use crate::structs::Resource;
@@ -14,6 +12,11 @@ use aruna_rust_api::api::storage::models::v2::{
 use aruna_rust_api::api::storage::services::v2::Pubkey;
 use dashmap::{DashMap, DashSet};
 use diesel_ulid::DieselUlid;
+use std::mem;
+use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Debug)]
 pub struct Cache {
@@ -25,6 +28,7 @@ pub struct Cache {
     pub user_cache: DashMap<DieselUlid, User, RandomState>,
     pub pubkeys: DashMap<i32, PubKey, RandomState>,
     pub oidc_ids: DashMap<String, DieselUlid, RandomState>,
+    pub lock: Arc<AtomicBool>,
 }
 
 impl Default for Cache {
@@ -44,10 +48,14 @@ impl Cache {
             user_cache: DashMap::with_hasher(RandomState::new()),
             pubkeys: DashMap::with_hasher(RandomState::new()),
             oidc_ids: DashMap::with_hasher(RandomState::new()),
+            lock: Arc::new(AtomicBool::new(false)),
         }
     }
 
     pub fn traverse_graph(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let mut return_vec = Vec::new();
         let l1 = self
             .relations_cache
@@ -74,6 +82,9 @@ impl Cache {
     }
 
     pub fn get_parents_with_targets(&self, from: &Resource, targets: Vec<Resource>) -> Result<()> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         match &from {
             Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),
             Resource::Collection(_) => {
@@ -128,6 +139,9 @@ impl Cache {
 
     // Gets a list of parent -> child connections, always from parent to child
     pub fn get_parents(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         // TODO: This will only match one possible traversal path
         let mut return_vec = Vec::new();
         match &from {
@@ -288,10 +302,16 @@ impl Cache {
     }
 
     pub fn get_persistent(&self, shared: &DieselUlid) -> Option<Resource> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         self.shared_to_pid.get(shared).map(|e| e.value().clone())
     }
 
     pub fn get_shared(&self, persistent: &DieselUlid) -> Option<Resource> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         self.pid_to_shared
             .get(persistent)
             .map(|e| e.value().clone())
@@ -324,6 +344,9 @@ impl Cache {
     }
 
     pub fn get_pubkeys(&self) -> Vec<PubKey> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         self.pubkeys
             .to_owned()
             .into_iter()
@@ -344,6 +367,9 @@ impl Cache {
     }
 
     pub fn get_user_by_oidc(&self, oidc_id: &str) -> Option<User> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         self.oidc_ids
             .get(oidc_id)
             .and_then(|e| self.user_cache.get(&e.value()))
@@ -351,6 +377,9 @@ impl Cache {
     }
 
     pub fn get_user(&self, user_id: DieselUlid) -> Option<User> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         self.user_cache.get(&user_id).map(|e| e.value().clone())
     }
 
@@ -498,7 +527,27 @@ impl Cache {
         Ok((Vec::from_iter(new_rel), remove))
     }
 
-    pub fn process_full_sync(&self, fs_data: FullSyncData) -> Result<()> {
+    pub fn process_full_sync(&self, mut fs_data: FullSyncData) -> Result<()> {
+        // Lock getting resources while full syncing
+        self.lock.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.set_pubkeys(mem::take(&mut fs_data.pubkeys));
+
+        self.user_cache.clear();
+        self.oidc_ids.clear();
+        for u in fs_data.users {
+            self.add_or_update_user(u.1)?;
+        }
+        self.relations_cache.clear();
+        self.name_cache.clear();
+        self.pid_to_shared.clear();
+        self.shared_to_pid.clear();
+        self.object_cache.clear();
+
+        for (shared, ps, resource) in fs_data.resources {
+            self.process_api_resource_update(resource, shared, ps)?;
+        }
+
+        self.lock.store(false, std::sync::atomic::Ordering::Relaxed);
         Ok(())
     }
 }

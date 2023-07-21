@@ -48,7 +48,7 @@ impl tonic::service::Interceptor for ClientInterceptor {
 pub struct NotificationCache {
     notification_service:
         Option<EventNotificationServiceClient<InterceptedService<Channel, ClientInterceptor>>>,
-    query: Box<dyn QueryHandler>,
+    query: Box<dyn QueryHandler + Send + Sync>,
     pub cache: Cache,
 }
 
@@ -56,7 +56,7 @@ impl NotificationCache {
     pub async fn new(
         token: impl Into<String>,
         server: impl Into<String>,
-        qhandler: Box<dyn QueryHandler>,
+        qhandler: Box<dyn QueryHandler + Send + Sync>,
     ) -> Result<Self> {
         let tls_config = ClientTlsConfig::new();
         let endpoint = Channel::from_shared(server.into())?.tls_config(tls_config)?;

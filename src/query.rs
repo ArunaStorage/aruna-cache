@@ -63,14 +63,14 @@ pub struct ApiQueryHandler {
     endpoint_service: EndpointServiceClient<InterceptedService<Channel, ClientInterceptor>>,
     storage_status_service:
         StorageStatusServiceClient<InterceptedService<Channel, ClientInterceptor>>,
-    persistence: Option<Box<dyn PersistenceHandler + Send + Sync>>,
+    _persistence: Option<Box<dyn PersistenceHandler + Send + Sync>>,
 }
 
 impl ApiQueryHandler {
     async fn new(
         token: impl Into<String>,
         server: impl Into<String>,
-        persistence: Option<Box<dyn PersistenceHandler + Send + Sync>>,
+        _persistence: Option<Box<dyn PersistenceHandler + Send + Sync>>,
     ) -> Result<Self> {
         let tls_config = ClientTlsConfig::new();
         let endpoint = Channel::from_shared(server.into())?.tls_config(tls_config)?;
@@ -123,7 +123,7 @@ impl ApiQueryHandler {
             user_service,
             endpoint_service,
             storage_status_service,
-            persistence,
+            _persistence,
         })
     }
 }
@@ -211,7 +211,7 @@ impl QueryHandler for ApiQueryHandler {
             ),
         };
 
-        if checksum != checksum_resource(&resource)? {
+        if checksum != checksum_resource(resource.clone())? {
             bail!("Invalid checksum")
         }
 

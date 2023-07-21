@@ -1,6 +1,5 @@
 use crate::cache::Cache;
 use crate::query::QueryHandler;
-use crate::structs::Resource;
 use crate::utils::GetRef;
 use anyhow::anyhow;
 use anyhow::Result;
@@ -17,8 +16,6 @@ use aruna_rust_api::api::notification::services::v2::GetEventMessageBatchStreamR
 use aruna_rust_api::api::notification::services::v2::Reply;
 use aruna_rust_api::api::notification::services::v2::ResourceEvent;
 use aruna_rust_api::api::notification::services::v2::UserEvent;
-use aruna_rust_api::api::storage::models::v2::generic_resource::Resource as ApiResource;
-use aruna_rust_api::api::storage::models::v2::ResourceVariant;
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
 use tonic::codegen::InterceptedService;
@@ -41,7 +38,6 @@ impl tonic::service::Interceptor for ClientInterceptor {
             AsciiMetadataKey::from_bytes("authorization".as_bytes()).unwrap(),
             AsciiMetadataValue::try_from(format!("Bearer {}", self.api_token.as_str())).unwrap(),
         );
-
         Ok(mut_req)
     }
 }
@@ -175,28 +171,5 @@ impl NotificationCache {
             _ => (),
         }
         event.reply
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
-    use aruna_rust_api::api::notification::services::v2::EventMessage;
-    use aruna_rust_api::api::notification::services::v2::Reply;
-    use aruna_rust_api::api::notification::services::v2::Resource as APIResource;
-    use aruna_rust_api::api::notification::services::v2::ResourceEvent;
-
-    fn _mtemplate(res: APIResource) -> EventMessage {
-        EventMessage {
-            message_variant: Some(MessageVariant::ResourceEvent(ResourceEvent {
-                resource: Some(res.clone()),
-                event_variant: res.resource_variant,
-                reply: Some(Reply {
-                    reply: "a_reply".into(),
-                    salt: "a_salt".into(),
-                    hmac: "a_hmac".into(),
-                }),
-            })),
-        }
     }
 }

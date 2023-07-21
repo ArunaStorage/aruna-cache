@@ -501,7 +501,7 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use aruna_rust_api::api::storage::models::v2::{
-        permission::ResourceId, Permission, Token, UserAttributes,
+        permission::ResourceId, ExternalId, Permission, Token, UserAttributes,
     };
 
     use super::*;
@@ -544,7 +544,10 @@ mod tests {
             user_id,
             User {
                 id: user_id.to_string(),
-                external_ids: Vec::new(),
+                external_ids: vec![ExternalId {
+                    external_id: "1".to_string(),
+                    idp: "1".to_string(),
+                }],
                 display_name: "Name".to_string(),
                 active: true,
                 email: "t@t.t".to_string(),

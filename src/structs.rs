@@ -2,7 +2,9 @@ use aruna_rust_api::api::storage::models::v2::permission::ResourceId;
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
 
-#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Hash, Clone)]
+#[derive(
+    Debug, PartialEq, PartialOrd, Eq, Ord, Hash, Clone, serde::Serialize, serde::Deserialize,
+)]
 pub enum Resource {
     Project(DieselUlid),
     Collection(DieselUlid),

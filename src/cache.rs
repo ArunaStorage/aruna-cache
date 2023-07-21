@@ -1,34 +1,29 @@
+use std::str::FromStr;
+
 use crate::structs::PubKey;
-use crate::structs::{Resource, ResourcePermission};
+use crate::structs::Resource;
 use crate::utils::internal_relation_to_rel;
 use ahash::{HashMap, RandomState};
 use anyhow::anyhow;
 use anyhow::Result;
-use aruna_rust_api::api::storage::models::v2::permission::ResourceId;
-use aruna_rust_api::api::storage::models::v2::{
-    generic_resource::Resource as ApiResource, PermissionLevel,
-};
+use aruna_rust_api::api::storage::models::v2::generic_resource::Resource as ApiResource;
 use aruna_rust_api::api::storage::models::v2::{
     relation, InternalRelationVariant, Relation, ResourceVariant, User,
 };
 use aruna_rust_api::api::storage::services::v2::Pubkey;
 use dashmap::{DashMap, DashSet};
 use diesel_ulid::DieselUlid;
-use std::str::FromStr;
 
 #[derive(Debug)]
 pub struct Cache {
-    // Graph cache contains From -> [all]
-    pub graph_cache: DashMap<Resource, DashSet<Resource, RandomState>, RandomState>,
+    pub relations_cache: DashMap<Resource, DashSet<Resource, RandomState>, RandomState>,
     pub name_cache: DashMap<String, DashSet<Resource, RandomState>, RandomState>,
     pub shared_to_pid: DashMap<DieselUlid, Resource, RandomState>,
     pub pid_to_shared: DashMap<DieselUlid, Resource, RandomState>,
     pub object_cache: DashMap<Resource, ApiResource, RandomState>,
-    pub permissions:
-        DashMap<DieselUlid, DashMap<ResourcePermission, PermissionLevel, RandomState>, RandomState>,
+    pub user_cache: DashMap<DieselUlid, User, RandomState>,
     pub pubkeys: DashMap<i32, PubKey, RandomState>,
-    pub oidc_ids: DashMap<String, (DieselUlid, String), RandomState>,
-    pub token_ids: DashMap<DieselUlid, DieselUlid, RandomState>,
+    pub oidc_ids: DashMap<String, DieselUlid, RandomState>,
 }
 
 impl Default for Cache {
@@ -40,30 +35,29 @@ impl Default for Cache {
 impl Cache {
     pub fn new() -> Self {
         Cache {
-            graph_cache: DashMap::with_hasher(RandomState::new()),
+            relations_cache: DashMap::with_hasher(RandomState::new()),
             name_cache: DashMap::with_hasher(RandomState::new()),
             shared_to_pid: DashMap::with_hasher(RandomState::new()),
             pid_to_shared: DashMap::with_hasher(RandomState::new()),
             object_cache: DashMap::with_hasher(RandomState::new()),
-            permissions: DashMap::with_hasher(RandomState::new()),
+            user_cache: DashMap::with_hasher(RandomState::new()),
             pubkeys: DashMap::with_hasher(RandomState::new()),
             oidc_ids: DashMap::with_hasher(RandomState::new()),
-            token_ids: DashMap::with_hasher(RandomState::new()),
         }
     }
 
     pub fn traverse_graph(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
         let mut return_vec = Vec::new();
         let l1 = self
-            .graph_cache
+            .relations_cache
             .get(from)
             .ok_or_else(|| anyhow::anyhow!("Cannot find resource"))?;
         for l1_item in l1.iter() {
             let l1_cloned = l1_item.clone();
-            if let Some(l2) = self.graph_cache.get(&l1_cloned) {
+            if let Some(l2) = self.relations_cache.get(&l1_cloned) {
                 for l2_item in l2.iter() {
                     let l2_cloned = l2_item.clone();
-                    if let Some(l3) = self.graph_cache.get(&l2_cloned) {
+                    if let Some(l3) = self.relations_cache.get(&l2_cloned) {
                         for l3_item in l3.iter() {
                             let l3_cloned = l3_item.clone();
                             return_vec.push((l2_cloned.clone(), l3_cloned))
@@ -82,19 +76,19 @@ impl Cache {
         match &from {
             Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),
             Resource::Collection(_) => {
-                for ref_val in self.graph_cache.iter() {
+                for ref_val in self.relations_cache.iter() {
                     if ref_val.value().contains(from) && targets.contains(ref_val.key()) {
                         return Ok(());
                     }
                 }
             }
             Resource::Dataset(_) => {
-                for ref1_val in self.graph_cache.iter() {
+                for ref1_val in self.relations_cache.iter() {
                     if ref1_val.value().contains(from) {
                         if targets.contains(ref1_val.key()) {
                             return Ok(());
                         }
-                        for ref2_val in self.graph_cache.iter() {
+                        for ref2_val in self.relations_cache.iter() {
                             if ref2_val.value().contains(ref1_val.key())
                                 && targets.contains(ref2_val.key())
                             {
@@ -105,17 +99,17 @@ impl Cache {
                 }
             }
             Resource::Object(_) => {
-                for ref1_val in self.graph_cache.iter() {
+                for ref1_val in self.relations_cache.iter() {
                     if ref1_val.value().contains(from) {
                         if targets.contains(ref1_val.key()) {
                             return Ok(());
                         }
-                        for ref2_val in self.graph_cache.iter() {
+                        for ref2_val in self.relations_cache.iter() {
                             if ref2_val.value().contains(ref1_val.key()) {
                                 if targets.contains(ref2_val.key()) {
                                     return Ok(());
                                 }
-                                for ref3_val in self.graph_cache.iter() {
+                                for ref3_val in self.relations_cache.iter() {
                                     if ref3_val.value().contains(ref2_val.key())
                                         && targets.contains(ref3_val.key())
                                     {
@@ -138,7 +132,7 @@ impl Cache {
         match &from {
             Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),
             Resource::Collection(_) => {
-                for ref_val in self.graph_cache.iter() {
+                for ref_val in self.relations_cache.iter() {
                     if ref_val.value().contains(from) {
                         return_vec.push((ref_val.key().clone(), from.clone()));
                         break;
@@ -149,9 +143,9 @@ impl Cache {
                 }
             }
             Resource::Dataset(_) => {
-                for ref1_val in self.graph_cache.iter() {
+                for ref1_val in self.relations_cache.iter() {
                     if ref1_val.value().contains(from) {
-                        for ref2_val in self.graph_cache.iter() {
+                        for ref2_val in self.relations_cache.iter() {
                             if ref2_val.value().contains(ref1_val.key()) {
                                 return_vec.push((ref2_val.key().clone(), ref1_val.key().clone()));
                                 break;
@@ -166,11 +160,11 @@ impl Cache {
                 }
             }
             Resource::Object(_) => {
-                for ref1_val in self.graph_cache.iter() {
+                for ref1_val in self.relations_cache.iter() {
                     if ref1_val.value().contains(from) {
-                        for ref2_val in self.graph_cache.iter() {
+                        for ref2_val in self.relations_cache.iter() {
                             if ref2_val.value().contains(ref1_val.key()) {
-                                for ref3_val in self.graph_cache.iter() {
+                                for ref3_val in self.relations_cache.iter() {
                                     if ref3_val.value().contains(ref2_val.key()) {
                                         return_vec
                                             .push((ref3_val.key().clone(), ref2_val.key().clone()));
@@ -195,17 +189,17 @@ impl Cache {
     }
 
     pub fn remove_all_res(&self, res: Resource) {
-        self.graph_cache.remove(&res);
-        for x in self.graph_cache.iter_mut() {
+        self.relations_cache.remove(&res);
+        for x in self.relations_cache.iter_mut() {
             x.value().remove(&res);
         }
     }
 
-    pub fn add_name(&self, res: Resource, name: String) {
+    fn add_name(&self, res: Resource, name: String) {
         self.name_cache.entry(name).or_default().insert(res);
     }
 
-    pub fn remove_name(&self, res: Resource, name: Option<String>) {
+    fn remove_name(&self, res: Resource, name: Option<String>) {
         if let Some(name) = name {
             self.name_cache.entry(name).or_default().remove(&res);
         } else {
@@ -217,7 +211,7 @@ impl Cache {
         }
     }
 
-    pub fn add_link(&self, from: Resource, to: Resource) -> Result<()> {
+    fn add_link(&self, from: Resource, to: Resource) -> Result<()> {
         match (&from, &to) {
             (&Resource::Project(_), &Resource::Collection(_)) => (),
             (&Resource::Project(_), &Resource::Dataset(_)) => (),
@@ -227,13 +221,13 @@ impl Cache {
             (&Resource::Dataset(_), &Resource::Object(_)) => (),
             (_, _) => return Err(anyhow!("Invalid pair from: {:#?}, to: {:#?}", from, to)),
         }
-        let entry = self.graph_cache.entry(from).or_default();
+        let entry = self.relations_cache.entry(from).or_default();
         entry.insert(to);
         Ok(())
     }
 
-    pub fn remove_link(&self, from: Resource, to: Resource) {
-        let entry = self.graph_cache.entry(from).or_default();
+    fn remove_link(&self, from: Resource, to: Resource) {
+        let entry = self.relations_cache.entry(from).or_default();
         entry.remove(&to);
     }
 
@@ -302,42 +296,6 @@ impl Cache {
             .map(|e| e.value().clone())
     }
 
-    pub fn add_or_update_permission(
-        &self,
-        id: DieselUlid,
-        perm: (ResourcePermission, PermissionLevel),
-    ) {
-        let entry = self.permissions.entry(id).or_default();
-        entry.insert(perm.0, perm.1);
-    }
-
-    pub fn remove_permission(
-        &self,
-        id: DieselUlid,
-        res: Option<ResourcePermission>,
-        full_entry: bool,
-    ) {
-        if full_entry {
-            self.permissions.remove(&id);
-        } else if let Some(e) = self.permissions.get_mut(&id) {
-            if let Some(p) = res {
-                e.remove(&p);
-            }
-        }
-    }
-
-    pub fn get_permissions(
-        &self,
-        id: &DieselUlid,
-    ) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
-        let perms = self.permissions.get(id)?;
-        let mut return_vec = Vec::new();
-        for x in perms.value() {
-            return_vec.push((x.key().clone(), *x.value()))
-        }
-        Some(return_vec)
-    }
-
     pub fn add_pubkey(&self, id: i32, pk: PubKey) {
         self.pubkeys.insert(id, pk);
     }
@@ -372,135 +330,25 @@ impl Cache {
             .collect()
     }
 
-    pub fn add_oidc(&self, oidc_id: String, user_id: DieselUlid, url: String) {
-        self.oidc_ids.insert(oidc_id, (user_id, url));
-    }
-    pub fn remove_oidc(&self, oidc_id: &str) {
-        self.oidc_ids.remove(oidc_id);
-    }
-    pub fn get_user_perm_by_oidc(
-        &self,
-        oidc_id: &str,
-    ) -> Option<Vec<(ResourcePermission, PermissionLevel)>> {
-        let ulid = self.oidc_ids.get(oidc_id)?.0;
-        self.get_permissions(&ulid)
+    fn add_oidc(&self, oidc_id: String, user_id: DieselUlid) {
+        self.oidc_ids.insert(oidc_id, user_id);
     }
 
-    pub fn add_user_token(&self, token_id: DieselUlid, user_id: DieselUlid) {
-        self.token_ids.insert(token_id, user_id);
+    pub fn add_or_update_user(&self, user: User) -> Result<()> {
+        self.user_cache
+            .insert(DieselUlid::from_str(&user.id)?, user);
+        Ok(())
     }
 
-    pub fn remove_user_token(&self, token_id: DieselUlid) {
-        self.token_ids.remove(&token_id);
+    pub fn get_user_by_oidc(&self, oidc_id: &str) -> Option<User> {
+        self.oidc_ids
+            .get(oidc_id)
+            .and_then(|e| self.user_cache.get(&e.value()))
+            .map(|e| e.value().clone())
     }
 
-    pub fn get_user_by_token(&self, token_id: DieselUlid) -> Option<DieselUlid> {
-        self.token_ids.get(&token_id).map(|e| *e.value())
-    }
-
-    pub fn remove_all_tokens_by_user(&self, user_id: DieselUlid) {
-        for (t, id) in self.token_ids.clone() {
-            // Remove all tokens and permissions
-            if id == user_id {
-                self.permissions.remove(&t);
-                self.token_ids.remove(&t);
-            }
-        }
-    }
-
-    pub fn parse_and_update_user_info(&self, uinfo: User) -> Option<()> {
-        let uid = DieselUlid::from_str(&uinfo.id).ok()?;
-        let user_attributes = uinfo.attributes?;
-
-        self.remove_all_tokens_by_user(uid);
-        let user_perm: DashMap<ResourcePermission, PermissionLevel, RandomState> =
-            DashMap::with_hasher(RandomState::new());
-
-        if user_attributes.global_admin {
-            user_perm.insert(ResourcePermission::GlobalAdmin, PermissionLevel::Admin);
-        }
-
-        if user_attributes.service_account {
-            user_perm.insert(ResourcePermission::ServiceAccount, PermissionLevel::None);
-        }
-
-        for ext_id in uinfo.external_ids {
-            self.oidc_ids.insert(ext_id.external_id, (uid, ext_id.idp));
-        }
-
-        for p in user_attributes.personal_permissions {
-            let res_id = p.clone().resource_id?;
-            match res_id {
-                ResourceId::ProjectId(pid) => user_perm.insert(
-                    ResourcePermission::Resource(Resource::Project(
-                        DieselUlid::from_str(&pid).ok()?,
-                    )),
-                    p.permission_level(),
-                ),
-                ResourceId::CollectionId(cid) => user_perm.insert(
-                    ResourcePermission::Resource(Resource::Collection(
-                        DieselUlid::from_str(&cid).ok()?,
-                    )),
-                    p.permission_level(),
-                ),
-                ResourceId::DatasetId(did) => user_perm.insert(
-                    ResourcePermission::Resource(Resource::Dataset(
-                        DieselUlid::from_str(&did).ok()?,
-                    )),
-                    p.permission_level(),
-                ),
-                ResourceId::ObjectId(oid) => user_perm.insert(
-                    ResourcePermission::Resource(Resource::Object(
-                        DieselUlid::from_str(&oid).ok()?,
-                    )),
-                    p.permission_level(),
-                ),
-            };
-        }
-
-        for t in user_attributes.tokens {
-            let token_id = DieselUlid::from_str(&t.id).ok()?;
-            match t.permission {
-                Some(perm) => {
-                    let map: DashMap<ResourcePermission, PermissionLevel, RandomState> =
-                        DashMap::with_hasher(RandomState::new());
-                    let res_id = perm.clone().resource_id?;
-                    match res_id {
-                        ResourceId::ProjectId(pid) => map.insert(
-                            ResourcePermission::Resource(Resource::Project(
-                                DieselUlid::from_str(&pid).ok()?,
-                            )),
-                            perm.permission_level(),
-                        ),
-                        ResourceId::CollectionId(cid) => map.insert(
-                            ResourcePermission::Resource(Resource::Collection(
-                                DieselUlid::from_str(&cid).ok()?,
-                            )),
-                            perm.permission_level(),
-                        ),
-                        ResourceId::DatasetId(did) => map.insert(
-                            ResourcePermission::Resource(Resource::Dataset(
-                                DieselUlid::from_str(&did).ok()?,
-                            )),
-                            perm.permission_level(),
-                        ),
-                        ResourceId::ObjectId(oid) => map.insert(
-                            ResourcePermission::Resource(Resource::Object(
-                                DieselUlid::from_str(&oid).ok()?,
-                            )),
-                            perm.permission_level(),
-                        ),
-                    };
-                    self.permissions.insert(token_id, map);
-                }
-                None => {
-                    self.add_user_token(uid, token_id);
-                    self.permissions.insert(token_id, user_perm.clone());
-                }
-            }
-        }
-
-        Some(())
+    pub fn remove_user(&self, user_id: &DieselUlid) {
+        self.user_cache.remove(user_id);
     }
 
     pub fn process_api_resource_update(
@@ -637,6 +485,10 @@ impl Cache {
 
 #[cfg(test)]
 mod tests {
+    use aruna_rust_api::api::storage::models::v2::{
+        permission::ResourceId, Permission, Token, UserAttributes,
+    };
+
     use super::*;
     use crate::structs::Resource::*;
 
@@ -645,12 +497,12 @@ mod tests {
         let cache = Cache::new();
 
         let cache2 = Cache {
-            graph_cache: DashMap::with_hasher(RandomState::new()),
+            relations_cache: DashMap::with_hasher(RandomState::new()),
             name_cache: DashMap::with_hasher(RandomState::new()),
             shared_to_pid: DashMap::with_hasher(RandomState::new()),
             pid_to_shared: DashMap::with_hasher(RandomState::new()),
             object_cache: DashMap::with_hasher(RandomState::new()),
-            permissions: DashMap::with_hasher(RandomState::new()),
+            user_cache: DashMap::with_hasher(RandomState::new()),
             pubkeys: DashMap::with_hasher(RandomState::new()),
             ..Default::default()
         };
@@ -665,6 +517,56 @@ mod tests {
         assert!(cache
             .traverse_graph(&Resource::Collection(DieselUlid::generate()))
             .is_err());
+    }
+
+    fn generate_user(
+        token_perm: Option<Permission>,
+        personal_perm: Vec<Permission>,
+    ) -> (DieselUlid, User) {
+        let user_id = DieselUlid::generate();
+
+        (
+            user_id,
+            User {
+                id: user_id.to_string(),
+                external_ids: Vec::new(),
+                display_name: "Name".to_string(),
+                active: true,
+                email: "t@t.t".to_string(),
+                attributes: Some(UserAttributes {
+                    global_admin: false,
+                    service_account: false,
+                    tokens: vec![Token {
+                        id: DieselUlid::generate().to_string(),
+                        name: "a_token".to_string(),
+                        user_id: user_id.to_string(),
+                        created_at: None,
+                        expires_at: None,
+                        permission: token_perm,
+                        used_at: None,
+                    }],
+                    custom_attributes: vec![],
+                    personal_permissions: personal_perm,
+                }),
+            },
+        )
+    }
+
+    #[test]
+    fn test_user() {
+        let cache = Cache::new();
+
+        let project_id = DieselUlid::generate();
+
+        let (id, user) = generate_user(
+            None,
+            vec![Permission {
+                permission_level: 1,
+                resource_id: Some(ResourceId::ProjectId(project_id.to_string())),
+            }],
+        );
+
+        cache.add_or_update_user(user).unwrap();
     }
 
     #[test]
@@ -889,92 +791,7 @@ mod tests {
         cache.remove_link(resource_a.clone(), resource_b.clone());
 
         // Check if the link is removed
-        assert!(cache.graph_cache.get(&resource_a).unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_add_or_update_permission() {
-        let cache = Cache::new();
-        let resource_id = DieselUlid::generate();
-        let permission = (
-            ResourcePermission::Resource(Resource::Project(DieselUlid::generate())),
-            PermissionLevel::Read,
-        );
-
-        // Test adding a permission
-        cache.add_or_update_permission(resource_id, permission.clone());
-
-        // Check if the permission is added
-        let result = cache
-            .permissions
-            .get(&resource_id)
-            .map(|entry| entry.clone().into_iter().collect::<Vec<_>>())
-            .unwrap_or_default();
-        let expected = vec![(permission.clone().0, permission.clone().1)];
-        assert_eq!(result, expected);
-
-        // Test updating a permission
-        let updated_permission = (ResourcePermission::GlobalAdmin, PermissionLevel::Write);
-        cache.add_or_update_permission(resource_id, updated_permission.clone());
-
-        // Check if the permission is updated
-        let result = cache
-            .permissions
-            .get(&resource_id)
-            .map(|entry| entry.clone().into_iter().collect::<Vec<_>>())
-            .unwrap_or_default();
-        let expected = vec![permission, (updated_permission.0, updated_permission.1)];
-        assert!(result.iter().all(|item| expected.contains(item)));
-    }
-
-    #[test]
-    fn test_remove_permission() {
-        let cache = Cache::new();
-        let resource_id = DieselUlid::generate();
-        let permission = (
-            ResourcePermission::Resource(Resource::Project(DieselUlid::generate())),
-            PermissionLevel::Read,
-        );
-
-        // Add a permission to the cache
-        cache.add_or_update_permission(resource_id, permission.clone());
-
-        // Test removing a specific permission
-        cache.remove_permission(resource_id, Some(permission.0), true);
-
-        // Check if the permission is removed for the specific resource
-        assert!(!cache.permissions.contains_key(&resource_id));
-
-        let permission = (
-            ResourcePermission::Resource(Resource::Project(DieselUlid::generate())),
-            PermissionLevel::Read,
-        );
-        cache.add_or_update_permission(resource_id, permission.clone());
-        cache.remove_permission(resource_id, Some(permission.0), false);
-        assert!(cache.permissions.get(&resource_id).unwrap().is_empty());
-    }
-
-    #[test]
-    fn test_get_permissions() {
-        let cache = Cache::new();
-        let resource_id = DieselUlid::generate();
-        let permission_1 = (
-            ResourcePermission::Resource(Resource::Project(DieselUlid::generate())),
-            PermissionLevel::Read,
-        );
-        let permission_2 = (ResourcePermission::GlobalAdmin, PermissionLevel::Write);
-
-        // Add permissions to the cache
-        cache.add_or_update_permission(resource_id, permission_1.clone());
-        cache.add_or_update_permission(resource_id, permission_2.clone());
-
-        // Test getting permissions
-        let result = cache
-            .get_permissions(&resource_id)
-            .map(|perms| perms.into_iter().collect::<Vec<_>>())
-            .unwrap();
-        let expected = vec![permission_1.clone(), permission_2.clone()];
-        assert!(result.iter().all(|item| expected.contains(item)));
+        assert!(cache.relations_cache.get(&resource_a).unwrap().is_empty());
     }
 
     #[test]
@@ -1074,46 +891,5 @@ mod tests {
         assert!(cache
             .get_parents_with_targets(&object_a, vec![project_b.clone()])
             .is_err());
-    }
-
-    #[test]
-    fn test_oidc() {
-        let cache = Cache::new();
-
-        let name = "a_name".to_string();
-        let id = DieselUlid::generate();
-
-        cache.add_oidc(name.clone(), id, "test.test".to_string());
-
-        assert!(cache.get_user_perm_by_oidc(&name).is_none());
-
-        cache.add_or_update_permission(
-            id,
-            (ResourcePermission::GlobalAdmin, PermissionLevel::Admin),
-        );
-
-        assert!(
-            cache.get_user_perm_by_oidc(&name).unwrap()
-                == vec![(ResourcePermission::GlobalAdmin, PermissionLevel::Admin)]
-        );
-
-        cache.remove_oidc(&name);
-        assert!(cache.get_user_perm_by_oidc(&name).is_none());
-    }
-
-    #[test]
-    fn test_token_association() {
-        let cache = Cache::new();
-
-        let uid = DieselUlid::generate();
-        let tid = DieselUlid::generate();
-
-        cache.add_user_token(tid, uid);
-
-        assert_eq!(cache.get_user_by_token(tid).unwrap(), uid);
-
-        cache.remove_user_token(tid);
-
-        assert!(cache.get_user_by_token(tid).is_none());
     }
 }

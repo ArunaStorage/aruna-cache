@@ -1,10 +1,11 @@
 use crate::checksum::{checksum_resource, checksum_user};
 use crate::persistence::PersistenceHandler;
+use crate::structs::Resource;
 use crate::utils::ClientInterceptor;
 use anyhow::anyhow;
 use anyhow::Result;
 use aruna_rust_api::api::storage::models::v2::{
-    generic_resource, Collection, Dataset, Object, Project, User,
+    generic_resource, Collection, Dataset, GenericResource, Object, Project, User,
 };
 use aruna_rust_api::api::storage::services::v2::collection_service_client::{
     self, CollectionServiceClient,
@@ -31,18 +32,24 @@ use aruna_rust_api::api::storage::services::v2::{
 };
 use async_trait::async_trait;
 use diesel_ulid::DieselUlid;
+use serde::{Deserialize, Serialize};
 use tonic::codegen::InterceptedService;
 use tonic::transport::{Channel, ClientTlsConfig};
 use tonic::Request;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FullSyncData {
+    resources: Vec<(DieselUlid, Resource, generic_resource::Resource)>,
+    users: Vec<(DieselUlid, User)>,
+    pubkeys: Vec<APIPubkey>,
+}
 
 #[async_trait]
 pub trait QueryHandler {
     async fn get_user(&self, id: DieselUlid, checksum: String) -> Result<User>;
     async fn get_pubkeys(&self) -> Result<Vec<APIPubkey>>;
-    async fn get_project(&self, id: DieselUlid, checksum: String) -> Result<Project>;
-    async fn get_collection(&self, id: DieselUlid, checksum: String) -> Result<Collection>;
-    async fn get_dataset(&self, id: DieselUlid, checksum: String) -> Result<Dataset>;
-    async fn get_object(&self, id: DieselUlid, checksum: String) -> Result<Object>;
+    async fn get_resource(&self, res: Resource, checksum: String) -> Result<GenericResource>;
+    async fn full_sync(&self) -> Result<FullSyncData>;
 }
 
 pub struct ApiQueryHandler {

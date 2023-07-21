@@ -72,22 +72,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3b13c32d80ecc7ab747b80c3784bce54ee8a7a0cc4fbda9bf4cda2cf6fe90854"
 
 [[package]]
-name = "aruna-rust-api"
-version = "2.0.0-alpha.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ddf12ca409ddc45cdaf501b92bb816523e01ed85dda72d99ed83d8e781292508"
-dependencies = [
- "prost",
- "prost-types",
- "prost-wkt-types",
- "serde",
- "serde_json",
- "tonic",
- "tonic-build",
-]
-
-[[package]]
-name = "aruna_cache"
+name = "aruna-cache"
 version = "0.2.1-alpha.1"
 dependencies = [
  "ahash",
@@ -102,6 +87,21 @@ dependencies = [
  "tokio",
  "tonic",
  "xxhash-rust",
+]
+
+[[package]]
+name = "aruna-rust-api"
+version = "2.0.0-alpha.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "ddf12ca409ddc45cdaf501b92bb816523e01ed85dda72d99ed83d8e781292508"
+dependencies = [
+ "prost",
+ "prost-types",
+ "prost-wkt-types",
+ "serde",
+ "serde_json",
+ "tonic",
+ "tonic-build",
 ]
 
 [[package]]

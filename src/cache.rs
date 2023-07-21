@@ -351,6 +351,10 @@ impl Cache {
         self.user_cache.remove(user_id);
     }
 
+    pub fn remove_resource(&self, persistent_resource: Resource, shared_id: DieselUlid) {
+        todo!()
+    }
+
     pub fn process_api_resource_update(
         &self,
         res: ApiResource,

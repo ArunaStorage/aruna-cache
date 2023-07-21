@@ -48,7 +48,11 @@ pub struct FullSyncData {
 pub trait QueryHandler {
     async fn get_user(&self, id: DieselUlid, checksum: String) -> Result<User>;
     async fn get_pubkeys(&self) -> Result<Vec<APIPubkey>>;
-    async fn get_resource(&self, res: Resource, checksum: String) -> Result<GenericResource>;
+    async fn get_resource(
+        &self,
+        res: &Resource,
+        checksum: String,
+    ) -> Result<generic_resource::Resource>;
     async fn full_sync(&self) -> Result<FullSyncData>;
 }
 
@@ -126,111 +130,111 @@ impl ApiQueryHandler {
     }
 }
 
-#[async_trait]
-impl QueryHandler for ApiQueryHandler {
-    async fn get_user(&self, id: DieselUlid, checksum: String) -> Result<User> {
-        let user = self
-            .user_service
-            .clone()
-            .get_user_redacted(Request::new(GetUserRedactedRequest {
-                user_id: id.to_string(),
-            }))
-            .await?
-            .into_inner()
-            .user
-            .ok_or(anyhow!("Unknown user"))?;
+// #[async_trait]
+// impl QueryHandler for ApiQueryHandler {
+//     async fn get_user(&self, id: DieselUlid, checksum: String) -> Result<User> {
+//         let user = self
+//             .user_service
+//             .clone()
+//             .get_user_redacted(Request::new(GetUserRedactedRequest {
+//                 user_id: id.to_string(),
+//             }))
+//             .await?
+//             .into_inner()
+//             .user
+//             .ok_or(anyhow!("Unknown user"))?;
 
-        let actual_checksum = checksum_user(&user)?;
+//         let actual_checksum = checksum_user(&user)?;
 
-        if actual_checksum != checksum {
-            //TODO: RETRY!
-        }
-        Ok(user)
-    }
-    async fn get_pubkeys(&self) -> Result<Vec<APIPubkey>> {
-        Ok(self
-            .storage_status_service
-            .clone()
-            .get_pubkeys(Request::new(GetPubkeysRequest {}))
-            .await?
-            .into_inner()
-            .pubkeys)
-    }
-    async fn get_project(&self, id: DieselUlid, checksum: String) -> Result<Project> {
-        let proj = self
-            .project_service
-            .clone()
-            .get_project(Request::new(GetProjectRequest {
-                project_id: id.to_string(),
-            }))
-            .await?
-            .into_inner()
-            .project
-            .ok_or(anyhow!("unknown project"))?;
+//         if actual_checksum != checksum {
+//             //TODO: RETRY!
+//         }
+//         Ok(user)
+//     }
+//     async fn get_pubkeys(&self) -> Result<Vec<APIPubkey>> {
+//         Ok(self
+//             .storage_status_service
+//             .clone()
+//             .get_pubkeys(Request::new(GetPubkeysRequest {}))
+//             .await?
+//             .into_inner()
+//             .pubkeys)
+//     }
+//     async fn get_project(&self, id: DieselUlid, checksum: String) -> Result<Project> {
+//         let proj = self
+//             .project_service
+//             .clone()
+//             .get_project(Request::new(GetProjectRequest {
+//                 project_id: id.to_string(),
+//             }))
+//             .await?
+//             .into_inner()
+//             .project
+//             .ok_or(anyhow!("unknown project"))?;
 
-        let actual_checksum = checksum_resource(generic_resource::Resource::Project(proj.clone()))?;
+//         let actual_checksum = checksum_resource(generic_resource::Resource::Project(proj.clone()))?;
 
-        if actual_checksum != checksum {
-            //TODO: RETRY!
-        }
-        Ok(proj)
-    }
-    async fn get_collection(&self, id: DieselUlid, checksum: String) -> Result<Collection> {
-        let col = self
-            .collection_service
-            .clone()
-            .get_collection(Request::new(GetCollectionRequest {
-                collection_id: id.to_string(),
-            }))
-            .await?
-            .into_inner()
-            .collection
-            .ok_or(anyhow!("unknown collection"))?;
+//         if actual_checksum != checksum {
+//             //TODO: RETRY!
+//         }
+//         Ok(proj)
+//     }
+//     async fn get_collection(&self, id: DieselUlid, checksum: String) -> Result<Collection> {
+//         let col = self
+//             .collection_service
+//             .clone()
+//             .get_collection(Request::new(GetCollectionRequest {
+//                 collection_id: id.to_string(),
+//             }))
+//             .await?
+//             .into_inner()
+//             .collection
+//             .ok_or(anyhow!("unknown collection"))?;
 
-        let actual_checksum =
-            checksum_resource(generic_resource::Resource::Collection(col.clone()))?;
+//         let actual_checksum =
+//             checksum_resource(generic_resource::Resource::Collection(col.clone()))?;
 
-        if actual_checksum != checksum {
-            //TODO: RETRY!
-        }
-        Ok(col)
-    }
-    async fn get_dataset(&self, id: DieselUlid, checksum: String) -> Result<Dataset> {
-        let ds = self
-            .dataset_service
-            .clone()
-            .get_dataset(Request::new(GetDatasetRequest {
-                dataset_id: id.to_string(),
-            }))
-            .await?
-            .into_inner()
-            .dataset
-            .ok_or(anyhow!("unknown collection"))?;
+//         if actual_checksum != checksum {
+//             //TODO: RETRY!
+//         }
+//         Ok(col)
+//     }
+//     async fn get_dataset(&self, id: DieselUlid, checksum: String) -> Result<Dataset> {
+//         let ds = self
+//             .dataset_service
+//             .clone()
+//             .get_dataset(Request::new(GetDatasetRequest {
+//                 dataset_id: id.to_string(),
+//             }))
+//             .await?
+//             .into_inner()
+//             .dataset
+//             .ok_or(anyhow!("unknown collection"))?;
 
-        let actual_checksum = checksum_resource(generic_resource::Resource::Dataset(ds.clone()))?;
+//         let actual_checksum = checksum_resource(generic_resource::Resource::Dataset(ds.clone()))?;
 
-        if actual_checksum != checksum {
-            //TODO: RETRY!
-        }
-        Ok(ds)
-    }
-    async fn get_object(&self, id: DieselUlid, checksum: String) -> Result<Object> {
-        let obj = self
-            .object_service
-            .clone()
-            .get_object(Request::new(GetObjectRequest {
-                object_id: id.to_string(),
-            }))
-            .await?
-            .into_inner()
-            .object
-            .ok_or(anyhow!("unknown collection"))?;
+//         if actual_checksum != checksum {
+//             //TODO: RETRY!
+//         }
+//         Ok(ds)
+//     }
+//     async fn get_object(&self, id: DieselUlid, checksum: String) -> Result<Object> {
+//         let obj = self
+//             .object_service
+//             .clone()
+//             .get_object(Request::new(GetObjectRequest {
+//                 object_id: id.to_string(),
+//             }))
+//             .await?
+//             .into_inner()
+//             .object
+//             .ok_or(anyhow!("unknown collection"))?;
 
-        let actual_checksum = checksum_resource(generic_resource::Resource::Object(obj.clone()))?;
+//         let actual_checksum = checksum_resource(generic_resource::Resource::Object(obj.clone()))?;
 
-        if actual_checksum != checksum {
-            //TODO: RETRY!
-        }
-        Ok(obj)
-    }
-}
+//         if actual_checksum != checksum {
+//             //TODO: RETRY!
+//         }
+//         Ok(obj)
+//     }
+// }

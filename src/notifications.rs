@@ -1,5 +1,6 @@
 use crate::cache::Cache;
 use crate::query::QueryHandler;
+use crate::structs::Resource;
 use crate::utils::GetRef;
 use anyhow::anyhow;
 use anyhow::Result;
@@ -139,12 +140,11 @@ impl NotificationCache {
             EventVariant::Created | EventVariant::Available | EventVariant::Updated => {
                 let uid = DieselUlid::from_str(&message.user_id).ok()?;
                 let user_info = self.query.get_user(uid, message.checksum).await.ok()?;
-                self.cache.parse_and_update_user_info(user_info)?;
+                self.cache.add_or_update_user(user_info).ok()?;
             }
             EventVariant::Deleted => {
                 let uid = DieselUlid::from_str(&message.user_id).ok()?;
-                self.cache.remove_all_tokens_by_user(uid);
-                self.cache.remove_permission(uid, None, true)
+                self.cache.remove_user(&uid);
             }
             _ => (),
         }
@@ -156,63 +156,20 @@ impl NotificationCache {
             EventVariant::Created | EventVariant::Updated => {
                 if let Some(r) = event.resource {
                     let (shared_id, persistent_res) = r.get_ref()?;
-                    match r.resource_variant() {
-                        ResourceVariant::Project => {
-                            let pid = DieselUlid::from_str(&r.resource_id).ok()?;
-                            let project_info =
-                                self.query.get_project(pid, r.checksum).await.ok()?;
-                            self.cache
-                                .process_api_resource_update(
-                                    ApiResource::Project(project_info),
-                                    shared_id,
-                                    persistent_res,
-                                )
-                                .ok()?
-                        }
-                        ResourceVariant::Collection => {
-                            let cid = DieselUlid::from_str(&r.resource_id).ok()?;
-                            let collection_info =
-                                self.query.get_collection(cid, r.checksum).await.ok()?;
-                            self.cache
-                                .process_api_resource_update(
-                                    ApiResource::Collection(collection_info),
-                                    shared_id,
-                                    persistent_res,
-                                )
-                                .ok()?
-                        }
-                        ResourceVariant::Dataset => {
-                            let did = DieselUlid::from_str(&r.resource_id).ok()?;
-                            let dataset_info =
-                                self.query.get_dataset(did, r.checksum).await.ok()?;
-                            self.cache
-                                .process_api_resource_update(
-                                    ApiResource::Dataset(dataset_info),
-                                    shared_id,
-                                    persistent_res,
-                                )
-                                .ok()?
-                        }
-                        ResourceVariant::Object => {
-                            let oid = DieselUlid::from_str(&r.resource_id).ok()?;
-                            let object_info = self.query.get_object(oid, r.checksum).await.ok()?;
-                            self.cache
-                                .process_api_resource_update(
-                                    ApiResource::Object(object_info),
-                                    shared_id,
-                                    persistent_res,
-                                )
-                                .ok()?
-                        }
-                        _ => (),
-                    }
+                    let info = self
+                        .query
+                        .get_resource(&persistent_res, r.checksum)
+                        .await
+                        .ok()?;
+                    self.cache
+                        .process_api_resource_update(info, shared_id, persistent_res)
+                        .ok()?
                 }
             }
             EventVariant::Deleted => {
                 if let Some(r) = event.resource {
-                    let (_associated_id, res) = r.get_ref()?;
-                    self.cache.remove_name(res.clone(), None);
-                    self.cache.remove_all_res(res)
+                    let (associated_id, res) = r.get_ref()?;
+                    self.cache.remove_resource(res, associated_id);
                 }
             }
             _ => (),

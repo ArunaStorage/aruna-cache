@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use crate::query::FullSyncData;
 use crate::structs::PubKey;
 use crate::structs::Resource;
 use crate::utils::internal_relation_to_rel;
@@ -495,6 +496,10 @@ impl Cache {
             }
         }
         Ok((Vec::from_iter(new_rel), remove))
+    }
+
+    pub fn process_full_sync(&self, fs_data: FullSyncData) -> Result<()> {
+        Ok(())
     }
 }
 

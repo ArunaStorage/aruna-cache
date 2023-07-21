@@ -18,6 +18,7 @@ use aruna_rust_api::api::notification::services::v2::ResourceEvent;
 use aruna_rust_api::api::notification::services::v2::UserEvent;
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
+use std::time::Duration;
 use tonic::codegen::InterceptedService;
 use tonic::metadata::{AsciiMetadataKey, AsciiMetadataValue};
 use tonic::transport::{Channel, ClientTlsConfig};
@@ -135,7 +136,23 @@ impl NotificationCache {
         match message.event_variant() {
             EventVariant::Created | EventVariant::Available | EventVariant::Updated => {
                 let uid = DieselUlid::from_str(&message.user_id).ok()?;
-                let user_info = self.query.get_user(uid, message.checksum).await.ok()?;
+                let mut retry_counter = 0;
+                let user_info = loop {
+                    match self.query.get_user(uid, message.checksum.clone()).await {
+                        Ok(u) => break Some(u),
+                        Err(_) => {
+                            tokio::time::sleep(Duration::from_millis(100 * retry_counter)).await;
+                            retry_counter += 1;
+
+                            if retry_counter > 10 {
+                                self.cache
+                                    .process_full_sync(self.query.full_sync().await.ok()?)
+                                    .ok()?;
+                                break None;
+                            }
+                        }
+                    }
+                }?;
                 self.cache.add_or_update_user(user_info).ok()?;
             }
             EventVariant::Deleted => {
@@ -152,11 +169,29 @@ impl NotificationCache {
             EventVariant::Created | EventVariant::Updated => {
                 if let Some(r) = event.resource {
                     let (shared_id, persistent_res) = r.get_ref()?;
-                    let info = self
-                        .query
-                        .get_resource(&persistent_res, r.checksum)
-                        .await
-                        .ok()?;
+
+                    let mut retry_counter = 0;
+                    let info = loop {
+                        match self
+                            .query
+                            .get_resource(&persistent_res, r.checksum.clone())
+                            .await
+                        {
+                            Ok(r) => break Some(r),
+                            Err(_) => {
+                                tokio::time::sleep(Duration::from_millis(100 * retry_counter))
+                                    .await;
+                                retry_counter += 1;
+
+                                if retry_counter > 10 {
+                                    self.cache
+                                        .process_full_sync(self.query.full_sync().await.ok()?)
+                                        .ok()?;
+                                    break None;
+                                }
+                            }
+                        };
+                    }?;
                     self.cache
                         .process_api_resource_update(info, shared_id, persistent_res)
                         .ok()?

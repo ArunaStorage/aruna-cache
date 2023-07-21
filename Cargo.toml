@@ -1,6 +1,6 @@
 [package]
 name = "aruna_cache"
-version = "0.2.0"
+version = "0.2.1-alpha.1"
 edition = "2021"
 description = "A library to cache resources for AOS"
 repository = "https://github.com/ArunaStorage/aruna-cache"

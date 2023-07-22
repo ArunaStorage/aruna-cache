@@ -20,10 +20,10 @@ pub trait GetName {
 impl GetName for generic_resource::Resource {
     fn get_name(&self) -> String {
         match self {
-            generic_resource::Resource::Project(proj) => proj.name,
-            generic_resource::Resource::Collection(col) => col.name,
-            generic_resource::Resource::Dataset(ds) => ds.name,
-            generic_resource::Resource::Object(obj) => obj.name,
+            generic_resource::Resource::Project(proj) => proj.name.to_string(),
+            generic_resource::Resource::Collection(col) => col.name.to_string(),
+            generic_resource::Resource::Dataset(ds) => ds.name.to_string(),
+            generic_resource::Resource::Object(obj) => obj.name.to_string(),
         }
     }
 }

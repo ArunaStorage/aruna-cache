@@ -2,9 +2,11 @@ use crate::query::FullSyncData;
 use crate::structs::PubKey;
 use crate::structs::Resource;
 use crate::utils::internal_relation_to_rel;
+use crate::utils::GetName;
 use ahash::{HashMap, RandomState};
 use anyhow::anyhow;
 use anyhow::Result;
+use aruna_rust_api::api::storage::models::v2::generic_resource;
 use aruna_rust_api::api::storage::models::v2::generic_resource::Resource as ApiResource;
 use aruna_rust_api::api::storage::models::v2::{
     relation, InternalRelationVariant, Relation, ResourceVariant, User,
@@ -81,7 +83,7 @@ impl Cache {
         Ok(return_vec)
     }
 
-    pub fn get_parents_with_targets(&self, from: &Resource, targets: Vec<Resource>) -> Result<()> {
+    pub fn check_with_targets(&self, from: &Resource, targets: Vec<Resource>) -> Result<()> {
         while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(10));
         }
@@ -387,6 +389,10 @@ impl Cache {
         self.user_cache.remove(user_id);
     }
 
+    pub fn get_resource(&self, res: &Resource) -> Option<generic_resource::Resource> {
+        self.object_cache.get(res).map(|r| r.value().clone())
+    }
+
     pub fn remove_resource(&self, persistent_resource: Resource, shared_id: DieselUlid) {
         self.object_cache.remove(&persistent_resource);
         self.remove_name(persistent_resource, None);
@@ -549,6 +555,58 @@ impl Cache {
 
         self.lock.store(false, std::sync::atomic::Ordering::Relaxed);
         Ok(())
+    }
+
+    pub fn get_name_path(&self, name: String) -> Result<Vec<(Resource, Resource)>> {
+        let mut p;
+        let mut c;
+        let mut d;
+        let mut o;
+
+        if let Some((proj, substr)) = name.split_once("/") {
+            p = proj;
+            if let Some((col, substr)) = substr.split_once("/") {
+                c = Some(col);
+                if let Some((ds, obj)) = substr.split_once("/") {
+                    d = Some(ds);
+                    o = Some(obj);
+                } else {
+                    d = None
+                }
+            } else {
+                c = None
+            }
+        } else {
+            return Err(anyhow!("Unknown path"));
+        };
+
+        let project_resource = self
+            .name_cache
+            .get(p)
+            .ok_or_else(|| anyhow!("Unknown path"))?
+            .value()
+            .iter()
+            .find(|res| res.get_type() == ResourceVariant::Project)
+            .ok_or_else(|| anyhow!("Unknown path"))?
+            .clone();
+
+        Ok(vec![])
+        // self.relations_cache
+        //     .get(&project_resource)
+        //     .ok_or_else(|| anyhow!("Unknown path"))?
+        //     .value()
+        //     .iter()
+        //     .map(|element| {
+        //         if substr.contains(
+        //             &self
+        //                 .object_cache
+        //                 .get(&element.clone())
+        //                 .unwrap()
+        //                 .value()
+        //                 .get_name()
+        //                 .as_str(),
+        //         ) {}
+        //     });
     }
 }
 
@@ -952,16 +1010,16 @@ mod tests {
         cache.add_link(dataset_a.clone(), object_a.clone()).unwrap();
 
         assert!(cache
-            .get_parents_with_targets(&object_a, vec![project_a.clone()])
+            .check_with_targets(&object_a, vec![project_a.clone()])
             .is_ok());
         assert!(cache
-            .get_parents_with_targets(&object_a, vec![collection_d.clone()])
+            .check_with_targets(&object_a, vec![collection_d.clone()])
             .is_ok());
         assert!(cache
-            .get_parents_with_targets(&object_a, vec![dataset_a.clone()])
+            .check_with_targets(&object_a, vec![dataset_a.clone()])
             .is_ok());
         assert!(cache
-            .get_parents_with_targets(&object_a, vec![project_b.clone()])
+            .check_with_targets(&object_a, vec![project_b.clone()])
             .is_err());
     }
 }

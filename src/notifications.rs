@@ -1,5 +1,6 @@
 use crate::cache::Cache;
 use crate::query::QueryHandler;
+use crate::structs::Resource;
 use crate::utils::GetRef;
 use anyhow::anyhow;
 use anyhow::Result;
@@ -16,6 +17,8 @@ use aruna_rust_api::api::notification::services::v2::GetEventMessageBatchStreamR
 use aruna_rust_api::api::notification::services::v2::Reply;
 use aruna_rust_api::api::notification::services::v2::ResourceEvent;
 use aruna_rust_api::api::notification::services::v2::UserEvent;
+use aruna_rust_api::api::storage::models::v2::generic_resource;
+use aruna_rust_api::api::storage::models::v2::User;
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
 use std::time::Duration;
@@ -206,5 +209,21 @@ impl NotificationCache {
             _ => (),
         }
         event.reply
+    }
+
+    pub fn get_resource(&self, res: &Resource) -> Option<generic_resource::Resource> {
+        self.cache.get_resource(res)
+    }
+
+    pub fn get_user(&self, user_id: DieselUlid) -> Option<User> {
+        self.cache.get_user(user_id)
+    }
+
+    pub fn check_with_targets(&self, from: &Resource, targets: Vec<Resource>) -> Result<()> {
+        self.cache.check_with_targets(from, targets)
+    }
+
+    pub fn traverse_graph(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
+        self.cache.traverse_graph(from)
     }
 }

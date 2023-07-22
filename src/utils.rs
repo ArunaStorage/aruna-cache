@@ -2,7 +2,7 @@ use crate::structs::Resource;
 use anyhow::{anyhow, Result};
 use aruna_rust_api::api::{
     notification::services::v2::Resource as ApiResource,
-    storage::models::v2::{InternalRelation, RelationDirection, ResourceVariant},
+    storage::models::v2::{generic_resource, InternalRelation, RelationDirection, ResourceVariant},
 };
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
@@ -11,6 +11,21 @@ use tonic::metadata::AsciiMetadataValue;
 
 pub trait GetRef {
     fn get_ref(&self) -> Option<(DieselUlid, Resource)>;
+}
+
+pub trait GetName {
+    fn get_name(&self) -> String;
+}
+
+impl GetName for generic_resource::Resource {
+    fn get_name(&self) -> String {
+        match self {
+            generic_resource::Resource::Project(proj) => proj.name,
+            generic_resource::Resource::Collection(col) => col.name,
+            generic_resource::Resource::Dataset(ds) => ds.name,
+            generic_resource::Resource::Object(obj) => obj.name,
+        }
+    }
 }
 
 impl GetRef for ApiResource {

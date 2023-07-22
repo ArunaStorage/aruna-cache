@@ -1,4 +1,4 @@
-use aruna_rust_api::api::storage::models::v2::permission::ResourceId;
+use aruna_rust_api::api::storage::models::v2::{permission::ResourceId, ResourceVariant};
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
 
@@ -40,6 +40,15 @@ impl Resource {
             Resource::Collection(_) => Resource::Collection(new_id),
             Resource::Dataset(_) => Resource::Dataset(new_id),
             Resource::Object(_) => Resource::Object(new_id),
+        }
+    }
+
+    pub fn get_type(&self) -> ResourceVariant {
+        match self {
+            Resource::Project(_) => ResourceVariant::Project,
+            Resource::Collection(_) => ResourceVariant::Collection,
+            Resource::Dataset(_) => ResourceVariant::Dataset,
+            Resource::Object(_) => ResourceVariant::Object,
         }
     }
 }

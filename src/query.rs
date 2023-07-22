@@ -185,7 +185,7 @@ impl QueryHandler for ApiQueryHandler {
                     .await?
                     .into_inner()
                     .collection
-                    .ok_or(anyhow!("unknown project"))?,
+                    .ok_or(anyhow!("unknown collection"))?,
             ),
             Resource::Dataset(id) => generic_resource::Resource::Dataset(
                 self.dataset_service
@@ -196,7 +196,7 @@ impl QueryHandler for ApiQueryHandler {
                     .await?
                     .into_inner()
                     .dataset
-                    .ok_or(anyhow!("unknown project"))?,
+                    .ok_or(anyhow!("unknown dataset"))?,
             ),
             Resource::Object(id) => generic_resource::Resource::Object(
                 self.object_service
@@ -207,7 +207,7 @@ impl QueryHandler for ApiQueryHandler {
                     .await?
                     .into_inner()
                     .object
-                    .ok_or(anyhow!("unknown project"))?,
+                    .ok_or(anyhow!("unknown object"))?,
             ),
         };
 

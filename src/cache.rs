@@ -348,11 +348,7 @@ impl Cache {
         while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
             std::thread::sleep(Duration::from_millis(10));
         }
-        self.pubkeys
-            .to_owned()
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect()
+        self.pubkeys.iter().map(|e| e.value().clone()).collect()
     }
 
     fn add_or_update_oidc(&self, oidc_id: String, user_id: DieselUlid) {
@@ -373,7 +369,7 @@ impl Cache {
         }
         self.oidc_ids
             .get(oidc_id)
-            .and_then(|e| self.user_cache.get(&e.value()))
+            .and_then(|e| self.user_cache.get(e.value()))
             .map(|e| e.value().clone())
     }
 
@@ -563,48 +559,44 @@ impl Cache {
         let mut datasets: Vec<(String, Resource)> = Vec::new();
         let mut objects: Vec<(String, Resource)> = Vec::new();
 
-        if let Some((proj, substr)) = name.split_once("/") {
+        if let Some((proj, substr)) = name.split_once('/') {
             p = proj;
-            if let Some((col, substr)) = substr.split_once("/") {
-                self.name_cache.get(col).map(|e| {
+            if let Some((col, substr)) = substr.split_once('/') {
+                if let Some(e) = self.name_cache.get(col) {
                     for res in e.value().iter() {
                         if res.key().get_type() == ResourceVariant::Collection {
                             cols.push((col.to_string(), res.clone()));
                         }
                     }
-                });
-                if let Some((ds, obj)) = substr.split_once("/") {
-                    self.name_cache.get(ds).map(|e| {
+                };
+                if let Some((ds, obj)) = substr.split_once('/') {
+                    if let Some(e) = self.name_cache.get(ds) {
                         for res in e.value().iter() {
                             if res.key().get_type() == ResourceVariant::Dataset {
                                 datasets.push((ds.to_string(), res.clone()));
                             }
                         }
-                    });
-                    self.name_cache.get(obj).map(|e| {
+                    };
+                    if let Some(e) = self.name_cache.get(obj) {
                         for res in e.value().iter() {
                             if res.key().get_type() == ResourceVariant::Object {
                                 objects.push((obj.to_string(), res.clone()));
                             }
                         }
-                    });
-                } else {
-                    self.name_cache.get(substr).map(|e| {
-                        for res in e.value().iter() {
-                            if res.key().get_type() == ResourceVariant::Object {
-                                objects.push((substr.to_string(), res.clone()));
-                            }
-                        }
-                    });
-                }
-            } else {
-                self.name_cache.get(substr).map(|e| {
+                    };
+                } else if let Some(e) = self.name_cache.get(substr) {
                     for res in e.value().iter() {
                         if res.key().get_type() == ResourceVariant::Object {
                             objects.push((substr.to_string(), res.clone()));
                         }
                     }
-                });
+                }
+            } else if let Some(e) = self.name_cache.get(substr) {
+                for res in e.value().iter() {
+                    if res.key().get_type() == ResourceVariant::Object {
+                        objects.push((substr.to_string(), res.clone()));
+                    }
+                }
             }
         } else {
             return Err(anyhow!("Unknown path"));

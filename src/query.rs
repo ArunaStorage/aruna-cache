@@ -67,6 +67,7 @@ pub struct ApiQueryHandler {
 }
 
 impl ApiQueryHandler {
+    #[allow(dead_code)]
     async fn new(
         token: impl Into<String>,
         server: impl Into<String>,

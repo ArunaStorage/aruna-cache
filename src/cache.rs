@@ -2,7 +2,6 @@ use crate::query::FullSyncData;
 use crate::structs::PubKey;
 use crate::structs::Resource;
 use crate::utils::internal_relation_to_rel;
-use crate::utils::GetName;
 use ahash::{HashMap, RandomState};
 use anyhow::anyhow;
 use anyhow::Result;
@@ -558,23 +557,54 @@ impl Cache {
     }
 
     pub fn get_name_path(&self, name: String) -> Result<Vec<(Resource, Resource)>> {
-        let mut p;
-        let mut c;
-        let mut d;
-        let mut o;
+        let mut result = Vec::new();
+        let p;
+        let mut cols: Vec<(String, Resource)> = Vec::new();
+        let mut datasets: Vec<(String, Resource)> = Vec::new();
+        let mut objects: Vec<(String, Resource)> = Vec::new();
 
         if let Some((proj, substr)) = name.split_once("/") {
             p = proj;
             if let Some((col, substr)) = substr.split_once("/") {
-                c = Some(col);
+                self.name_cache.get(col).map(|e| {
+                    for res in e.value().iter() {
+                        if res.key().get_type() == ResourceVariant::Collection {
+                            cols.push((col.to_string(), res.clone()));
+                        }
+                    }
+                });
                 if let Some((ds, obj)) = substr.split_once("/") {
-                    d = Some(ds);
-                    o = Some(obj);
+                    self.name_cache.get(ds).map(|e| {
+                        for res in e.value().iter() {
+                            if res.key().get_type() == ResourceVariant::Dataset {
+                                datasets.push((ds.to_string(), res.clone()));
+                            }
+                        }
+                    });
+                    self.name_cache.get(obj).map(|e| {
+                        for res in e.value().iter() {
+                            if res.key().get_type() == ResourceVariant::Object {
+                                objects.push((obj.to_string(), res.clone()));
+                            }
+                        }
+                    });
                 } else {
-                    d = None
+                    self.name_cache.get(substr).map(|e| {
+                        for res in e.value().iter() {
+                            if res.key().get_type() == ResourceVariant::Object {
+                                objects.push((substr.to_string(), res.clone()));
+                            }
+                        }
+                    });
                 }
             } else {
-                c = None
+                self.name_cache.get(substr).map(|e| {
+                    for res in e.value().iter() {
+                        if res.key().get_type() == ResourceVariant::Object {
+                            objects.push((substr.to_string(), res.clone()));
+                        }
+                    }
+                });
             }
         } else {
             return Err(anyhow!("Unknown path"));
@@ -590,23 +620,47 @@ impl Cache {
             .ok_or_else(|| anyhow!("Unknown path"))?
             .clone();
 
-        Ok(vec![])
-        // self.relations_cache
-        //     .get(&project_resource)
-        //     .ok_or_else(|| anyhow!("Unknown path"))?
-        //     .value()
-        //     .iter()
-        //     .map(|element| {
-        //         if substr.contains(
-        //             &self
-        //                 .object_cache
-        //                 .get(&element.clone())
-        //                 .unwrap()
-        //                 .value()
-        //                 .get_name()
-        //                 .as_str(),
-        //         ) {}
-        //     });
+        let mut target_set = self
+            .relations_cache
+            .get(&project_resource)
+            .ok_or_else(|| anyhow!("Unknown path"))?;
+
+        if !cols.is_empty() {
+            for (_, cid) in cols.iter() {
+                if target_set.value().contains(cid) {
+                    result.push((target_set.key().clone(), cid.clone()));
+                    target_set = self
+                        .relations_cache
+                        .get(cid)
+                        .ok_or_else(|| anyhow!("Unknown path"))?;
+                    break;
+                }
+            }
+        }
+
+        if !datasets.is_empty() {
+            for (_, did) in datasets.iter() {
+                if target_set.value().contains(did) {
+                    result.push((target_set.key().clone(), did.clone()));
+                    target_set = self
+                        .relations_cache
+                        .get(did)
+                        .ok_or_else(|| anyhow!("Unknown path"))?;
+                    break;
+                }
+            }
+        }
+
+        if !objects.is_empty() {
+            for (_, oid) in objects.iter() {
+                if target_set.value().contains(oid) {
+                    result.push((target_set.key().clone(), oid.clone()));
+                    break;
+                }
+            }
+        }
+
+        Ok(result)
     }
 }
 
@@ -1021,5 +1075,93 @@ mod tests {
         assert!(cache
             .check_with_targets(&object_a, vec![project_b.clone()])
             .is_err());
+    }
+
+    #[test]
+    fn test_get_name_path() {
+        let cache = Cache::new();
+
+        let project_a = Resource::Project(DieselUlid::generate());
+        let project_a_name = "a_proj_name".to_string();
+        let project_b = Resource::Project(DieselUlid::generate());
+        let project_b_name = "b_proj_name".to_string();
+        let collection_a = Resource::Collection(DieselUlid::generate());
+        let collection_a_name = "col_name".to_string();
+        let collection_b = Resource::Collection(DieselUlid::generate());
+        let collection_b_name = "col_name2".to_string();
+        let collection_c = Resource::Collection(DieselUlid::generate());
+        let collection_c_name = "col_name".to_string();
+        let collection_d = Resource::Collection(DieselUlid::generate());
+        let collection_d_name = "col_name2".to_string();
+
+        let dataset_a = Resource::Dataset(DieselUlid::generate());
+        let dataset_a_name = "ds_name".to_string();
+        let object_a = Resource::Object(DieselUlid::generate());
+        let object_a_name = "obj_name".to_string();
+
+        // Add entries to the graph cache
+        cache
+            .add_link(project_a.clone(), collection_a.clone())
+            .unwrap();
+        cache
+            .add_link(project_a.clone(), collection_b.clone())
+            .unwrap();
+        cache
+            .add_link(project_b.clone(), collection_c.clone())
+            .unwrap();
+        cache
+            .add_link(project_b.clone(), collection_d.clone())
+            .unwrap();
+        cache
+            .add_link(collection_a.clone(), dataset_a.clone())
+            .unwrap();
+        cache
+            .add_link(collection_b.clone(), dataset_a.clone())
+            .unwrap();
+        cache
+            .add_link(collection_c.clone(), dataset_a.clone())
+            .unwrap();
+        cache
+            .add_link(collection_d.clone(), dataset_a.clone())
+            .unwrap();
+        cache.add_link(dataset_a.clone(), object_a.clone()).unwrap();
+
+        cache.add_name(project_a.clone(), project_a_name);
+        cache.add_name(project_b.clone(), project_b_name);
+        cache.add_name(collection_a.clone(), collection_a_name);
+        cache.add_name(collection_b, collection_b_name);
+        cache.add_name(collection_c, collection_c_name);
+        cache.add_name(collection_d.clone(), collection_d_name);
+
+        cache.add_name(dataset_a.clone(), dataset_a_name);
+        cache.add_name(object_a.clone(), object_a_name);
+
+        let result = cache
+            .get_name_path("a_proj_name/col_name/ds_name/obj_name".to_string())
+            .unwrap();
+
+        let expected = vec![
+            (project_a, collection_a.clone()),
+            (collection_a, dataset_a.clone()),
+            (dataset_a.clone(), object_a.clone()),
+        ];
+
+        for res in expected {
+            assert!(result.contains(&res));
+        }
+
+        let result = cache
+            .get_name_path("b_proj_name/col_name2/ds_name/obj_name".to_string())
+            .unwrap();
+
+        let expected = vec![
+            (project_b, collection_d.clone()),
+            (collection_d, dataset_a.clone()),
+            (dataset_a, object_a),
+        ];
+
+        for res in expected {
+            assert!(result.contains(&res));
+        }
     }
 }

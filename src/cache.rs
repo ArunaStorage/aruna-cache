@@ -1,7 +1,9 @@
 use crate::query::FullSyncData;
 use crate::structs::PubKey;
+use crate::structs::ResPath;
 use crate::structs::Resource;
 use crate::utils::internal_relation_to_rel;
+use crate::utils::GetName;
 use ahash::{HashMap, RandomState};
 use anyhow::anyhow;
 use anyhow::Result;
@@ -552,6 +554,109 @@ impl Cache {
         Ok(())
     }
 
+    fn get_project_by_name(&self, name: &str) -> Result<Resource> {
+        Ok(self
+            .name_cache
+            .get(name)
+            .ok_or_else(|| anyhow!("Unknown path"))?
+            .value()
+            .iter()
+            .find(|res| res.get_type() == ResourceVariant::Project)
+            .ok_or_else(|| anyhow!("Unknown path"))?
+            .clone())
+    }
+
+    fn get_name(&self, res: &Resource) -> Result<String> {
+        Ok(self
+            .object_cache
+            .get(res)
+            .ok_or_else(|| anyhow!("Unknown path"))?
+            .value()
+            .get_name())
+    }
+
+    pub fn traverse_res_path(&self, name: &str) -> Result<Vec<ResPath>> {
+        let proj_res = self.get_project_by_name(name)?;
+
+        let mut results = Vec::new();
+        for rel in self
+            .relations_cache
+            .get(&proj_res)
+            .ok_or_else(|| anyhow!("Unknown path"))?
+            .value()
+            .iter()
+        {
+            let rel_name = self.get_name(&rel)?;
+            match rel.get_type() {
+                ResourceVariant::Collection => {
+                    for r2 in self
+                        .relations_cache
+                        .get(&rel)
+                        .ok_or_else(|| anyhow!("Unknown path"))?
+                        .value()
+                        .iter()
+                    {
+                        let r2_name = self.get_name(&r2)?;
+
+                        match r2.get_type() {
+                            ResourceVariant::Dataset => {
+                                for r3 in self
+                                    .relations_cache
+                                    .get(&rel)
+                                    .ok_or_else(|| anyhow!("Unknown path"))?
+                                    .value()
+                                    .iter()
+                                {
+                                    let r3_name = self.get_name(&r3)?;
+                                    results.push(ResPath {
+                                        project: (proj_res.clone(), name.to_string()),
+                                        collection: Some((rel.clone(), rel_name.to_string())),
+                                        dataset: Some((r2.clone(), r2_name.to_string())),
+                                        object: (r3.clone(), r3_name.to_string()),
+                                    })
+                                }
+                            }
+                            ResourceVariant::Object => results.push(ResPath {
+                                project: (proj_res.clone(), name.to_string()),
+                                collection: Some((rel.clone(), rel_name.to_string())),
+                                dataset: None,
+                                object: (r2.clone(), r2_name.to_string()),
+                            }),
+                            _ => return Err(anyhow!("Unknown object")),
+                        }
+                    }
+                }
+                ResourceVariant::Dataset => {
+                    for r3 in self
+                        .relations_cache
+                        .get(&rel)
+                        .ok_or_else(|| anyhow!("Unknown path"))?
+                        .value()
+                        .iter()
+                    {
+                        let r3_name = self.get_name(&r3)?;
+                        results.push(ResPath {
+                            project: (proj_res.clone(), name.to_string()),
+                            collection: None,
+                            dataset: Some((rel.clone(), rel_name.to_string())),
+                            object: (r3.clone(), r3_name.to_string()),
+                        })
+                    }
+                }
+                ResourceVariant::Object => {
+                    results.push(ResPath {
+                        project: (proj_res.clone(), name.to_string()),
+                        collection: None,
+                        dataset: None,
+                        object: (rel.clone(), rel_name.to_string()),
+                    });
+                }
+                _ => return Err(anyhow!("Unknown object")),
+            }
+        }
+        Ok(results)
+    }
+
     pub fn get_name_path(&self, name: String) -> Result<Vec<(Resource, Resource)>> {
         let mut result = Vec::new();
         let p;
@@ -602,15 +707,7 @@ impl Cache {
             return Err(anyhow!("Unknown path"));
         };
 
-        let project_resource = self
-            .name_cache
-            .get(p)
-            .ok_or_else(|| anyhow!("Unknown path"))?
-            .value()
-            .iter()
-            .find(|res| res.get_type() == ResourceVariant::Project)
-            .ok_or_else(|| anyhow!("Unknown path"))?
-            .clone();
+        let project_resource = self.get_project_by_name(p)?;
 
         let mut target_set = self
             .relations_cache

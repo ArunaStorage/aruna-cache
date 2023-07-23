@@ -71,3 +71,10 @@ pub enum PubKey {
     DataProxy(String),
     Server(String),
 }
+
+pub struct ResPath {
+    pub project: (Resource, String),
+    pub collection: Option<(Resource, String)>,
+    pub dataset: Option<(Resource, String)>,
+    pub object: (Resource, String),
+}

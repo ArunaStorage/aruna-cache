@@ -1,11 +1,13 @@
-use std::str::FromStr;
-
+use crate::query::FullSyncData;
 use crate::structs::PubKey;
+use crate::structs::ResPath;
 use crate::structs::Resource;
 use crate::utils::internal_relation_to_rel;
+use crate::utils::GetName;
 use ahash::{HashMap, RandomState};
 use anyhow::anyhow;
 use anyhow::Result;
+use aruna_rust_api::api::storage::models::v2::generic_resource;
 use aruna_rust_api::api::storage::models::v2::generic_resource::Resource as ApiResource;
 use aruna_rust_api::api::storage::models::v2::{
     relation, InternalRelationVariant, Relation, ResourceVariant, User,
@@ -13,6 +15,11 @@ use aruna_rust_api::api::storage::models::v2::{
 use aruna_rust_api::api::storage::services::v2::Pubkey;
 use dashmap::{DashMap, DashSet};
 use diesel_ulid::DieselUlid;
+use std::mem;
+use std::str::FromStr;
+use std::sync::atomic::AtomicBool;
+use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Debug)]
 pub struct Cache {
@@ -24,6 +31,7 @@ pub struct Cache {
     pub user_cache: DashMap<DieselUlid, User, RandomState>,
     pub pubkeys: DashMap<i32, PubKey, RandomState>,
     pub oidc_ids: DashMap<String, DieselUlid, RandomState>,
+    pub lock: Arc<AtomicBool>,
 }
 
 impl Default for Cache {
@@ -43,10 +51,14 @@ impl Cache {
             user_cache: DashMap::with_hasher(RandomState::new()),
             pubkeys: DashMap::with_hasher(RandomState::new()),
             oidc_ids: DashMap::with_hasher(RandomState::new()),
+            lock: Arc::new(AtomicBool::new(false)),
         }
     }
 
     pub fn traverse_graph(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         let mut return_vec = Vec::new();
         let l1 = self
             .relations_cache
@@ -72,7 +84,10 @@ impl Cache {
         Ok(return_vec)
     }
 
-    pub fn get_parents_with_targets(&self, from: &Resource, targets: Vec<Resource>) -> Result<()> {
+    pub fn check_with_targets(&self, from: &Resource, targets: Vec<Resource>) -> Result<()> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         match &from {
             Resource::Project(_) => return Err(anyhow!("Project does not have a parent")),
             Resource::Collection(_) => {
@@ -125,8 +140,28 @@ impl Cache {
         Err(anyhow!("Cannot find from resource: {:#?}", &from))
     }
 
+    pub fn check_from_multi_with_targets(
+        &self,
+        from: Vec<&Resource>,
+        mut targets: Vec<Resource>,
+    ) -> Result<()> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        for r in from {
+            self.check_with_targets(r, targets.clone())?;
+            // Expand the targets with already checked ones
+            // This avoids checking the same path multiple times
+            targets.push(r.clone());
+        }
+        Ok(())
+    }
+
     // Gets a list of parent -> child connections, always from parent to child
     pub fn get_parents(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         // TODO: This will only match one possible traversal path
         let mut return_vec = Vec::new();
         match &from {
@@ -287,10 +322,16 @@ impl Cache {
     }
 
     pub fn get_persistent(&self, shared: &DieselUlid) -> Option<Resource> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         self.shared_to_pid.get(shared).map(|e| e.value().clone())
     }
 
     pub fn get_shared(&self, persistent: &DieselUlid) -> Option<Resource> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         self.pid_to_shared
             .get(persistent)
             .map(|e| e.value().clone())
@@ -323,36 +364,56 @@ impl Cache {
     }
 
     pub fn get_pubkeys(&self) -> Vec<PubKey> {
-        self.pubkeys
-            .to_owned()
-            .into_iter()
-            .map(|(_, v)| v)
-            .collect()
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        self.pubkeys.iter().map(|e| e.value().clone()).collect()
     }
 
-    fn add_oidc(&self, oidc_id: String, user_id: DieselUlid) {
+    fn add_or_update_oidc(&self, oidc_id: String, user_id: DieselUlid) {
         self.oidc_ids.insert(oidc_id, user_id);
     }
 
     pub fn add_or_update_user(&self, user: User) -> Result<()> {
-        self.user_cache
-            .insert(DieselUlid::from_str(&user.id)?, user);
+        let uid = DieselUlid::from_str(&user.id)?;
+        let ext_id = user.external_ids.first().unwrap().external_id.clone();
+        self.user_cache.insert(uid, user);
+        self.add_or_update_oidc(ext_id, uid);
         Ok(())
     }
 
     pub fn get_user_by_oidc(&self, oidc_id: &str) -> Option<User> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         self.oidc_ids
             .get(oidc_id)
-            .and_then(|e| self.user_cache.get(&e.value()))
+            .and_then(|e| self.user_cache.get(e.value()))
             .map(|e| e.value().clone())
+    }
+
+    pub fn get_user(&self, user_id: DieselUlid) -> Option<User> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        self.user_cache.get(&user_id).map(|e| e.value().clone())
     }
 
     pub fn remove_user(&self, user_id: &DieselUlid) {
         self.user_cache.remove(user_id);
     }
 
+    pub fn get_resource(&self, res: &Resource) -> Option<generic_resource::Resource> {
+        self.object_cache.get(res).map(|r| r.value().clone())
+    }
+
     pub fn remove_resource(&self, persistent_resource: Resource, shared_id: DieselUlid) {
-        todo!()
+        self.object_cache.remove(&persistent_resource);
+        self.remove_name(persistent_resource, None);
+        let pid = self.shared_to_pid.get(&shared_id);
+        if let Some(pi) = pid {
+            self.pid_to_shared.remove(&pi.value().get_id());
+        }
     }
 
     pub fn process_api_resource_update(
@@ -485,12 +546,235 @@ impl Cache {
         }
         Ok((Vec::from_iter(new_rel), remove))
     }
+
+    pub fn process_full_sync(&self, mut fs_data: FullSyncData) -> Result<()> {
+        // Lock getting resources while full syncing
+        self.lock.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.set_pubkeys(mem::take(&mut fs_data.pubkeys));
+
+        self.user_cache.clear();
+        self.oidc_ids.clear();
+        for u in fs_data.users {
+            self.add_or_update_user(u.1)?;
+        }
+        self.relations_cache.clear();
+        self.name_cache.clear();
+        self.pid_to_shared.clear();
+        self.shared_to_pid.clear();
+        self.object_cache.clear();
+
+        for (shared, ps, resource) in fs_data.resources {
+            self.process_api_resource_update(resource, shared, ps)?;
+        }
+
+        self.lock.store(false, std::sync::atomic::Ordering::Relaxed);
+        Ok(())
+    }
+
+    fn get_project_by_name(&self, name: &str) -> Result<Resource> {
+        Ok(self
+            .name_cache
+            .get(name)
+            .ok_or_else(|| anyhow!("Unknown path"))?
+            .value()
+            .iter()
+            .find(|res| res.get_type() == ResourceVariant::Project)
+            .ok_or_else(|| anyhow!("Unknown path"))?
+            .clone())
+    }
+
+    fn get_name(&self, res: &Resource) -> Result<String> {
+        Ok(self
+            .object_cache
+            .get(res)
+            .ok_or_else(|| anyhow!("Unknown name"))?
+            .value()
+            .get_name())
+    }
+
+    pub fn traverse_res_path(&self, name: &str) -> Result<Vec<ResPath>> {
+        let proj_res = self.get_project_by_name(name)?;
+
+        let mut results = Vec::new();
+        for rel in self
+            .relations_cache
+            .get(&proj_res)
+            .ok_or_else(|| anyhow!("Unknown path"))?
+            .value()
+            .iter()
+        {
+            let rel_name = self.get_name(&rel)?;
+            match rel.get_type() {
+                ResourceVariant::Collection => {
+                    for r2 in self
+                        .relations_cache
+                        .get(&rel)
+                        .ok_or_else(|| anyhow!("Unknown path"))?
+                        .value()
+                        .iter()
+                    {
+                        let r2_name = self.get_name(&r2)?;
+
+                        match r2.get_type() {
+                            ResourceVariant::Dataset => {
+                                for r3 in self
+                                    .relations_cache
+                                    .get(&r2)
+                                    .ok_or_else(|| anyhow!("Unknown path"))?
+                                    .value()
+                                    .iter()
+                                {
+                                    let r3_name = self.get_name(&r3)?;
+                                    results.push(ResPath {
+                                        project: (proj_res.clone(), name.to_string()),
+                                        collection: Some((rel.clone(), rel_name.to_string())),
+                                        dataset: Some((r2.clone(), r2_name.to_string())),
+                                        object: (r3.clone(), r3_name.to_string()),
+                                    })
+                                }
+                            }
+                            ResourceVariant::Object => results.push(ResPath {
+                                project: (proj_res.clone(), name.to_string()),
+                                collection: Some((rel.clone(), rel_name.to_string())),
+                                dataset: None,
+                                object: (r2.clone(), r2_name.to_string()),
+                            }),
+                            _ => return Err(anyhow!("Unknown object")),
+                        }
+                    }
+                }
+                ResourceVariant::Dataset => {
+                    for r3 in self
+                        .relations_cache
+                        .get(&rel)
+                        .ok_or_else(|| anyhow!("Unknown path"))?
+                        .value()
+                        .iter()
+                    {
+                        let r3_name = self.get_name(&r3)?;
+                        results.push(ResPath {
+                            project: (proj_res.clone(), name.to_string()),
+                            collection: None,
+                            dataset: Some((rel.clone(), rel_name.to_string())),
+                            object: (r3.clone(), r3_name.to_string()),
+                        })
+                    }
+                }
+                ResourceVariant::Object => {
+                    results.push(ResPath {
+                        project: (proj_res.clone(), name.to_string()),
+                        collection: None,
+                        dataset: None,
+                        object: (rel.clone(), rel_name.to_string()),
+                    });
+                }
+                _ => return Err(anyhow!("Unknown object")),
+            }
+        }
+        Ok(results)
+    }
+
+    pub fn get_name_path(&self, name: String) -> Result<Vec<(Resource, Resource)>> {
+        let mut result = Vec::new();
+        let p;
+        let mut cols: Vec<(String, Resource)> = Vec::new();
+        let mut datasets: Vec<(String, Resource)> = Vec::new();
+        let mut objects: Vec<(String, Resource)> = Vec::new();
+
+        if let Some((proj, substr)) = name.split_once('/') {
+            p = proj;
+            if let Some((col, substr)) = substr.split_once('/') {
+                if let Some(e) = self.name_cache.get(col) {
+                    for res in e.value().iter() {
+                        if res.key().get_type() == ResourceVariant::Collection {
+                            cols.push((col.to_string(), res.clone()));
+                        }
+                    }
+                };
+                if let Some((ds, obj)) = substr.split_once('/') {
+                    if let Some(e) = self.name_cache.get(ds) {
+                        for res in e.value().iter() {
+                            if res.key().get_type() == ResourceVariant::Dataset {
+                                datasets.push((ds.to_string(), res.clone()));
+                            }
+                        }
+                    };
+                    if let Some(e) = self.name_cache.get(obj) {
+                        for res in e.value().iter() {
+                            if res.key().get_type() == ResourceVariant::Object {
+                                objects.push((obj.to_string(), res.clone()));
+                            }
+                        }
+                    };
+                } else if let Some(e) = self.name_cache.get(substr) {
+                    for res in e.value().iter() {
+                        if res.key().get_type() == ResourceVariant::Object {
+                            objects.push((substr.to_string(), res.clone()));
+                        }
+                    }
+                }
+            } else if let Some(e) = self.name_cache.get(substr) {
+                for res in e.value().iter() {
+                    if res.key().get_type() == ResourceVariant::Object {
+                        objects.push((substr.to_string(), res.clone()));
+                    }
+                }
+            }
+        } else {
+            return Err(anyhow!("Unknown path"));
+        };
+
+        let project_resource = self.get_project_by_name(p)?;
+
+        let mut target_set = self
+            .relations_cache
+            .get(&project_resource)
+            .ok_or_else(|| anyhow!("Unknown path"))?;
+
+        if !cols.is_empty() {
+            for (_, cid) in cols.iter() {
+                if target_set.value().contains(cid) {
+                    result.push((target_set.key().clone(), cid.clone()));
+                    target_set = self
+                        .relations_cache
+                        .get(cid)
+                        .ok_or_else(|| anyhow!("Unknown path"))?;
+                    break;
+                }
+            }
+        }
+
+        if !datasets.is_empty() {
+            for (_, did) in datasets.iter() {
+                if target_set.value().contains(did) {
+                    result.push((target_set.key().clone(), did.clone()));
+                    target_set = self
+                        .relations_cache
+                        .get(did)
+                        .ok_or_else(|| anyhow!("Unknown path"))?;
+                    break;
+                }
+            }
+        }
+
+        if !objects.is_empty() {
+            for (_, oid) in objects.iter() {
+                if target_set.value().contains(oid) {
+                    result.push((target_set.key().clone(), oid.clone()));
+                    break;
+                }
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use aruna_rust_api::api::storage::models::v2::{
-        permission::ResourceId, Permission, Token, UserAttributes,
+        permission::ResourceId, Collection as APICollection, Dataset as APIDataset, ExternalId,
+        Object as APIObject, Permission, Project, Token, UserAttributes,
     };
 
     use super::*;
@@ -533,7 +817,10 @@ mod tests {
             user_id,
             User {
                 id: user_id.to_string(),
-                external_ids: Vec::new(),
+                external_ids: vec![ExternalId {
+                    external_id: "1".to_string(),
+                    idp: "1".to_string(),
+                }],
                 display_name: "Name".to_string(),
                 active: true,
                 email: "t@t.t".to_string(),
@@ -562,7 +849,7 @@ mod tests {
 
         let project_id = DieselUlid::generate();
 
-        let (id, user) = generate_user(
+        let (_id, user) = generate_user(
             None,
             vec![Permission {
                 permission_level: 1,
@@ -884,16 +1171,194 @@ mod tests {
         cache.add_link(dataset_a.clone(), object_a.clone()).unwrap();
 
         assert!(cache
-            .get_parents_with_targets(&object_a, vec![project_a.clone()])
+            .check_with_targets(&object_a, vec![project_a.clone()])
             .is_ok());
         assert!(cache
-            .get_parents_with_targets(&object_a, vec![collection_d.clone()])
+            .check_with_targets(&object_a, vec![collection_d.clone()])
             .is_ok());
         assert!(cache
-            .get_parents_with_targets(&object_a, vec![dataset_a.clone()])
+            .check_with_targets(&object_a, vec![dataset_a.clone()])
             .is_ok());
         assert!(cache
-            .get_parents_with_targets(&object_a, vec![project_b.clone()])
+            .check_with_targets(&object_a, vec![project_b.clone()])
             .is_err());
+
+        assert!(cache
+            .check_from_multi_with_targets(
+                vec![&object_a, &dataset_a, &collection_b],
+                vec![project_a.clone()]
+            )
+            .is_ok());
+    }
+
+    #[test]
+    fn test_get_name_path() {
+        let cache = Cache::new();
+
+        let project_a = Resource::Project(DieselUlid::generate());
+        let project_a_name = "a_proj_name".to_string();
+        let project_b = Resource::Project(DieselUlid::generate());
+        let project_b_name = "b_proj_name".to_string();
+        let collection_a = Resource::Collection(DieselUlid::generate());
+        let collection_a_name = "col_name".to_string();
+        let collection_b = Resource::Collection(DieselUlid::generate());
+        let collection_b_name = "col_name2".to_string();
+        let collection_c = Resource::Collection(DieselUlid::generate());
+        let collection_c_name = "col_name".to_string();
+        let collection_d = Resource::Collection(DieselUlid::generate());
+        let collection_d_name = "col_name2".to_string();
+
+        let dataset_a = Resource::Dataset(DieselUlid::generate());
+        let dataset_a_name = "ds_name".to_string();
+        let object_a = Resource::Object(DieselUlid::generate());
+        let object_a_name = "obj_name".to_string();
+
+        // Add entries to the graph cache
+        cache
+            .add_link(project_a.clone(), collection_a.clone())
+            .unwrap();
+        cache
+            .add_link(project_a.clone(), collection_b.clone())
+            .unwrap();
+        cache
+            .add_link(project_b.clone(), collection_c.clone())
+            .unwrap();
+        cache
+            .add_link(project_b.clone(), collection_d.clone())
+            .unwrap();
+        cache
+            .add_link(collection_a.clone(), dataset_a.clone())
+            .unwrap();
+        cache
+            .add_link(collection_b.clone(), dataset_a.clone())
+            .unwrap();
+        cache
+            .add_link(collection_c.clone(), dataset_a.clone())
+            .unwrap();
+        cache
+            .add_link(collection_d.clone(), dataset_a.clone())
+            .unwrap();
+        cache.add_link(dataset_a.clone(), object_a.clone()).unwrap();
+
+        cache.add_name(project_a.clone(), project_a_name.clone());
+        cache.add_name(project_b.clone(), project_b_name);
+        cache.add_name(collection_a.clone(), collection_a_name.clone());
+        cache.add_name(collection_b.clone(), collection_b_name.clone());
+        cache.add_name(collection_c.clone(), collection_c_name.clone());
+        cache.add_name(collection_d.clone(), collection_d_name.clone());
+
+        cache.add_name(dataset_a.clone(), dataset_a_name.clone());
+        cache.add_name(object_a.clone(), object_a_name.clone());
+
+        let result = cache
+            .get_name_path("a_proj_name/col_name/ds_name/obj_name".to_string())
+            .unwrap();
+
+        let expected = vec![
+            (project_a.clone(), collection_a.clone()),
+            (collection_a.clone(), dataset_a.clone()),
+            (dataset_a.clone(), object_a.clone()),
+        ];
+
+        for res in expected {
+            assert!(result.contains(&res));
+        }
+
+        let result = cache
+            .get_name_path("b_proj_name/col_name2/ds_name/obj_name".to_string())
+            .unwrap();
+
+        let expected = vec![
+            (project_b, collection_d.clone()),
+            (collection_d, dataset_a.clone()),
+            (dataset_a.clone(), object_a.clone()),
+        ];
+
+        for res in expected {
+            assert!(result.contains(&res));
+        }
+
+        cache.object_cache.insert(
+            project_a.clone(),
+            generic_resource::Resource::Project(Project {
+                id: project_a.clone().get_id().to_string(),
+                name: project_a_name.clone(),
+                ..Default::default()
+            }),
+        );
+
+        cache.object_cache.insert(
+            collection_a.clone(),
+            generic_resource::Resource::Collection(APICollection {
+                id: collection_a.clone().get_id().to_string(),
+                name: collection_a_name.clone(),
+                ..Default::default()
+            }),
+        );
+
+        cache.object_cache.insert(
+            dataset_a.clone(),
+            generic_resource::Resource::Dataset(APIDataset {
+                id: dataset_a.clone().get_id().to_string(),
+                name: dataset_a_name.clone(),
+                ..Default::default()
+            }),
+        );
+
+        cache.object_cache.insert(
+            object_a.clone(),
+            generic_resource::Resource::Object(APIObject {
+                id: object_a.clone().get_id().to_string(),
+                name: object_a_name.clone(),
+                ..Default::default()
+            }),
+        );
+
+        cache.object_cache.insert(
+            collection_b.clone(),
+            generic_resource::Resource::Collection(APICollection {
+                id: collection_b.clone().get_id().to_string(),
+                name: collection_b_name.clone(),
+                ..Default::default()
+            }),
+        );
+
+        let test_trav = cache.traverse_res_path("a_proj_name").unwrap();
+
+        assert!(test_trav.contains(&ResPath {
+            project: (project_a.clone(), project_a_name.clone()),
+            collection: Some((collection_a.clone(), collection_a_name.clone())),
+            dataset: Some((dataset_a.clone(), dataset_a_name.clone())),
+            object: (object_a.clone(), object_a_name.clone())
+        }));
+
+        assert!(test_trav.contains(&ResPath {
+            project: (project_a.clone(), project_a_name.clone()),
+            collection: Some((collection_b.clone(), collection_b_name.clone())),
+            dataset: Some((dataset_a.clone(), dataset_a_name.clone())),
+            object: (object_a.clone(), object_a_name.clone())
+        }));
+    }
+
+    #[test]
+    fn test_get_obj() {
+        let cache = Cache::new();
+
+        let id = DieselUlid::generate();
+
+        let res = generic_resource::Resource::Project(Project {
+            id: id.to_string(),
+            name: "project_a_name".to_string(),
+            ..Default::default()
+        });
+
+        cache
+            .object_cache
+            .insert(Resource::Project(id.clone()), res.clone());
+
+        assert_eq!(
+            cache.get_resource(&Resource::Project(id.clone())).unwrap(),
+            res
+        );
     }
 }

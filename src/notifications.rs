@@ -17,10 +17,11 @@ use aruna_rust_api::api::notification::services::v2::GetEventMessageBatchStreamR
 use aruna_rust_api::api::notification::services::v2::Reply;
 use aruna_rust_api::api::notification::services::v2::ResourceEvent;
 use aruna_rust_api::api::notification::services::v2::UserEvent;
-use aruna_rust_api::api::storage::models::v2::generic_resource::Resource as ApiResource;
-use aruna_rust_api::api::storage::models::v2::ResourceVariant;
+use aruna_rust_api::api::storage::models::v2::generic_resource;
+use aruna_rust_api::api::storage::models::v2::User;
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
+use std::time::Duration;
 use tonic::codegen::InterceptedService;
 use tonic::metadata::{AsciiMetadataKey, AsciiMetadataValue};
 use tonic::transport::{Channel, ClientTlsConfig};
@@ -41,7 +42,6 @@ impl tonic::service::Interceptor for ClientInterceptor {
             AsciiMetadataKey::from_bytes("authorization".as_bytes()).unwrap(),
             AsciiMetadataValue::try_from(format!("Bearer {}", self.api_token.as_str())).unwrap(),
         );
-
         Ok(mut_req)
     }
 }
@@ -139,7 +139,23 @@ impl NotificationCache {
         match message.event_variant() {
             EventVariant::Created | EventVariant::Available | EventVariant::Updated => {
                 let uid = DieselUlid::from_str(&message.user_id).ok()?;
-                let user_info = self.query.get_user(uid, message.checksum).await.ok()?;
+                let mut retry_counter = 0;
+                let user_info = loop {
+                    match self.query.get_user(uid, message.checksum.clone()).await {
+                        Ok(u) => break Some(u),
+                        Err(_) => {
+                            tokio::time::sleep(Duration::from_millis(100 * retry_counter)).await;
+                            retry_counter += 1;
+
+                            if retry_counter > 10 {
+                                self.cache
+                                    .process_full_sync(self.query.full_sync().await.ok()?)
+                                    .ok()?;
+                                break None;
+                            }
+                        }
+                    }
+                }?;
                 self.cache.add_or_update_user(user_info).ok()?;
             }
             EventVariant::Deleted => {
@@ -156,11 +172,29 @@ impl NotificationCache {
             EventVariant::Created | EventVariant::Updated => {
                 if let Some(r) = event.resource {
                     let (shared_id, persistent_res) = r.get_ref()?;
-                    let info = self
-                        .query
-                        .get_resource(&persistent_res, r.checksum)
-                        .await
-                        .ok()?;
+
+                    let mut retry_counter = 0;
+                    let info = loop {
+                        match self
+                            .query
+                            .get_resource(&persistent_res, r.checksum.clone())
+                            .await
+                        {
+                            Ok(r) => break Some(r),
+                            Err(_) => {
+                                tokio::time::sleep(Duration::from_millis(100 * retry_counter))
+                                    .await;
+                                retry_counter += 1;
+
+                                if retry_counter > 10 {
+                                    self.cache
+                                        .process_full_sync(self.query.full_sync().await.ok()?)
+                                        .ok()?;
+                                    break None;
+                                }
+                            }
+                        };
+                    }?;
                     self.cache
                         .process_api_resource_update(info, shared_id, persistent_res)
                         .ok()?
@@ -176,27 +210,20 @@ impl NotificationCache {
         }
         event.reply
     }
-}
 
-#[cfg(test)]
-mod tests {
-    use aruna_rust_api::api::notification::services::v2::event_message::MessageVariant;
-    use aruna_rust_api::api::notification::services::v2::EventMessage;
-    use aruna_rust_api::api::notification::services::v2::Reply;
-    use aruna_rust_api::api::notification::services::v2::Resource as APIResource;
-    use aruna_rust_api::api::notification::services::v2::ResourceEvent;
+    pub fn get_resource(&self, res: &Resource) -> Option<generic_resource::Resource> {
+        self.cache.get_resource(res)
+    }
 
-    fn _mtemplate(res: APIResource) -> EventMessage {
-        EventMessage {
-            message_variant: Some(MessageVariant::ResourceEvent(ResourceEvent {
-                resource: Some(res.clone()),
-                event_variant: res.resource_variant,
-                reply: Some(Reply {
-                    reply: "a_reply".into(),
-                    salt: "a_salt".into(),
-                    hmac: "a_hmac".into(),
-                }),
-            })),
-        }
+    pub fn get_user(&self, user_id: DieselUlid) -> Option<User> {
+        self.cache.get_user(user_id)
+    }
+
+    pub fn check_with_targets(&self, from: &Resource, targets: Vec<Resource>) -> Result<()> {
+        self.cache.check_with_targets(from, targets)
+    }
+
+    pub fn traverse_graph(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
+        self.cache.traverse_graph(from)
     }
 }

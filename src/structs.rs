@@ -72,6 +72,7 @@ pub enum PubKey {
     Server(String),
 }
 
+#[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Hash, Clone)]
 pub struct ResPath {
     pub project: (Resource, String),
     pub collection: Option<(Resource, String)>,

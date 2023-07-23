@@ -587,7 +587,7 @@ impl Cache {
         Ok(self
             .object_cache
             .get(res)
-            .ok_or_else(|| anyhow!("Unknown path"))?
+            .ok_or_else(|| anyhow!("Unknown name"))?
             .value()
             .get_name())
     }
@@ -619,7 +619,7 @@ impl Cache {
                             ResourceVariant::Dataset => {
                                 for r3 in self
                                     .relations_cache
-                                    .get(&rel)
+                                    .get(&r2)
                                     .ok_or_else(|| anyhow!("Unknown path"))?
                                     .value()
                                     .iter()
@@ -773,7 +773,8 @@ impl Cache {
 #[cfg(test)]
 mod tests {
     use aruna_rust_api::api::storage::models::v2::{
-        permission::ResourceId, ExternalId, Permission, Token, UserAttributes,
+        permission::ResourceId, Collection as APICollection, Dataset as APIDataset, ExternalId,
+        Object as APIObject, Permission, Project, Token, UserAttributes,
     };
 
     use super::*;
@@ -1181,6 +1182,13 @@ mod tests {
         assert!(cache
             .check_with_targets(&object_a, vec![project_b.clone()])
             .is_err());
+
+        assert!(cache
+            .check_from_multi_with_targets(
+                vec![&object_a, &dataset_a, &collection_b],
+                vec![project_a.clone()]
+            )
+            .is_ok());
     }
 
     #[test]
@@ -1232,23 +1240,23 @@ mod tests {
             .unwrap();
         cache.add_link(dataset_a.clone(), object_a.clone()).unwrap();
 
-        cache.add_name(project_a.clone(), project_a_name);
+        cache.add_name(project_a.clone(), project_a_name.clone());
         cache.add_name(project_b.clone(), project_b_name);
-        cache.add_name(collection_a.clone(), collection_a_name);
-        cache.add_name(collection_b, collection_b_name);
-        cache.add_name(collection_c, collection_c_name);
-        cache.add_name(collection_d.clone(), collection_d_name);
+        cache.add_name(collection_a.clone(), collection_a_name.clone());
+        cache.add_name(collection_b.clone(), collection_b_name.clone());
+        cache.add_name(collection_c.clone(), collection_c_name.clone());
+        cache.add_name(collection_d.clone(), collection_d_name.clone());
 
-        cache.add_name(dataset_a.clone(), dataset_a_name);
-        cache.add_name(object_a.clone(), object_a_name);
+        cache.add_name(dataset_a.clone(), dataset_a_name.clone());
+        cache.add_name(object_a.clone(), object_a_name.clone());
 
         let result = cache
             .get_name_path("a_proj_name/col_name/ds_name/obj_name".to_string())
             .unwrap();
 
         let expected = vec![
-            (project_a, collection_a.clone()),
-            (collection_a, dataset_a.clone()),
+            (project_a.clone(), collection_a.clone()),
+            (collection_a.clone(), dataset_a.clone()),
             (dataset_a.clone(), object_a.clone()),
         ];
 
@@ -1263,11 +1271,94 @@ mod tests {
         let expected = vec![
             (project_b, collection_d.clone()),
             (collection_d, dataset_a.clone()),
-            (dataset_a, object_a),
+            (dataset_a.clone(), object_a.clone()),
         ];
 
         for res in expected {
             assert!(result.contains(&res));
         }
+
+        cache.object_cache.insert(
+            project_a.clone(),
+            generic_resource::Resource::Project(Project {
+                id: project_a.clone().get_id().to_string(),
+                name: project_a_name.clone(),
+                ..Default::default()
+            }),
+        );
+
+        cache.object_cache.insert(
+            collection_a.clone(),
+            generic_resource::Resource::Collection(APICollection {
+                id: collection_a.clone().get_id().to_string(),
+                name: collection_a_name.clone(),
+                ..Default::default()
+            }),
+        );
+
+        cache.object_cache.insert(
+            dataset_a.clone(),
+            generic_resource::Resource::Dataset(APIDataset {
+                id: dataset_a.clone().get_id().to_string(),
+                name: dataset_a_name.clone(),
+                ..Default::default()
+            }),
+        );
+
+        cache.object_cache.insert(
+            object_a.clone(),
+            generic_resource::Resource::Object(APIObject {
+                id: object_a.clone().get_id().to_string(),
+                name: object_a_name.clone(),
+                ..Default::default()
+            }),
+        );
+
+        cache.object_cache.insert(
+            collection_b.clone(),
+            generic_resource::Resource::Collection(APICollection {
+                id: collection_b.clone().get_id().to_string(),
+                name: collection_b_name.clone(),
+                ..Default::default()
+            }),
+        );
+
+        let test_trav = cache.traverse_res_path("a_proj_name").unwrap();
+
+        assert!(test_trav.contains(&ResPath {
+            project: (project_a.clone(), project_a_name.clone()),
+            collection: Some((collection_a.clone(), collection_a_name.clone())),
+            dataset: Some((dataset_a.clone(), dataset_a_name.clone())),
+            object: (object_a.clone(), object_a_name.clone())
+        }));
+
+        assert!(test_trav.contains(&ResPath {
+            project: (project_a.clone(), project_a_name.clone()),
+            collection: Some((collection_b.clone(), collection_b_name.clone())),
+            dataset: Some((dataset_a.clone(), dataset_a_name.clone())),
+            object: (object_a.clone(), object_a_name.clone())
+        }));
+    }
+
+    #[test]
+    fn test_get_obj() {
+        let cache = Cache::new();
+
+        let id = DieselUlid::generate();
+
+        let res = generic_resource::Resource::Project(Project {
+            id: id.to_string(),
+            name: "project_a_name".to_string(),
+            ..Default::default()
+        });
+
+        cache
+            .object_cache
+            .insert(Resource::Project(id.clone()), res.clone());
+
+        assert_eq!(
+            cache.get_resource(&Resource::Project(id.clone())).unwrap(),
+            res
+        );
     }
 }

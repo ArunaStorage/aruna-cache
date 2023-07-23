@@ -140,6 +140,23 @@ impl Cache {
         Err(anyhow!("Cannot find from resource: {:#?}", &from))
     }
 
+    pub fn check_from_multi_with_targets(
+        &self,
+        from: Vec<&Resource>,
+        mut targets: Vec<Resource>,
+    ) -> Result<()> {
+        while self.lock.load(std::sync::atomic::Ordering::Relaxed) {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        for r in from {
+            self.check_with_targets(r, targets.clone())?;
+            // Expand the targets with already checked ones
+            // This avoids checking the same path multiple times
+            targets.push(r.clone());
+        }
+        Ok(())
+    }
+
     // Gets a list of parent -> child connections, always from parent to child
     pub fn get_parents(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
         while self.lock.load(std::sync::atomic::Ordering::Relaxed) {

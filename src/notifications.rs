@@ -18,6 +18,7 @@ use aruna_rust_api::api::notification::services::v2::Reply;
 use aruna_rust_api::api::notification::services::v2::ResourceEvent;
 use aruna_rust_api::api::notification::services::v2::UserEvent;
 use aruna_rust_api::api::storage::models::v2::generic_resource;
+use aruna_rust_api::api::storage::models::v2::generic_resource::Resource as ApiResource;
 use aruna_rust_api::api::storage::models::v2::User;
 use diesel_ulid::DieselUlid;
 use std::str::FromStr;
@@ -225,5 +226,20 @@ impl NotificationCache {
 
     pub fn traverse_graph(&self, from: &Resource) -> Result<Vec<(Resource, Resource)>> {
         self.cache.traverse_graph(from)
+    }
+
+    pub fn resource_update(
+        &self,
+        res: ApiResource,
+        shared_id: DieselUlid,
+        persistent_resource: Resource,
+    ) {
+        self.cache
+            .process_api_resource_update(res, shared_id, persistent_resource)
+            .ok();
+    }
+
+    pub fn user_update(&self, user: User) -> Result<()> {
+        self.cache.add_or_update_user(user)
     }
 }

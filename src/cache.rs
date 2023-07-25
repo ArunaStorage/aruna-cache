@@ -404,7 +404,14 @@ impl Cache {
     }
 
     pub fn get_resource(&self, res: &Resource) -> Option<generic_resource::Resource> {
-        self.object_cache.get(res).map(|r| r.value().clone())
+        match self
+            .pid_to_shared
+            .get(&res.get_id())
+            .map(|shared| shared.value().clone())
+        {
+            Some(r) => self.object_cache.get(&r).map(|r| r.value().clone()),
+            None => self.object_cache.get(res).map(|r| r.value().clone()),
+        }
     }
 
     pub fn remove_resource(&self, persistent_resource: Resource, shared_id: DieselUlid) {
